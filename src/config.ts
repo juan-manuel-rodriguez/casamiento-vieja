@@ -3,7 +3,7 @@
 // The admin passphrase lives ONLY inside apps-script/Code.gs.
 
 /** Web App URL from the Apps Script deployment. Ends in /exec. */
-export const APPS_SCRIPT_URL = "https://script.google.com/u/0/home/projects/1m1fADkT848jZUVAvHAFF9i3-v63oFJy8kwSgtM76WXEPFioHx992iyrw/exec";
+export const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxAuHHq2B5_3RH_6RX3T3eLxqJw20Df2qEsA7GEDzviAkvhCrNtvnujf7zUlC3Aiwv4PA/exec";
 
 /**
  * Event metadata shown on the guest page. `photoUrl` is optional; when set it
@@ -17,6 +17,25 @@ export const EVENT = {
   venue: "Verne Restó & Eventos",
   address: "Rambla Costanera M29 S09, Ciudad de la Costa, Canelones",
   dressCode: "Sport Casual",
+  dressCodeDescription:
+    "Un estilo semi-formal: prolijo y cómodo, sin caer en lo de etiqueta.",
+  dressCodeWomen: [
+    "Vestido corto o midi, pollera midi o mono",
+    "Pantalón de vestir con blusa o camisa",
+    "Sandalias prolijas, plataformas o taco medio",
+  ],
+  dressCodeMen: [
+    "Pantalón de vestir y camisa",
+    "Saco o blazer liviano (opcional, sin corbata)",
+    "Zapatos cerrados o mocasines",
+  ],
+  dressCodeAvoid: [
+    "Pantalón de jean",
+    "Championes u ojotas",
+    "Remeras informales",
+    "Vestido largo de gala o traje de etiqueta",
+    "Blanco (es el color de la novia)",
+  ],
   mapUrl: "https://maps.app.goo.gl/SFZL2KjHdDynPJYC6",
   photoUrl: "",
   rsvpDeadline: "20 de septiembre",

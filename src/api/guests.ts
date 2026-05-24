@@ -54,10 +54,29 @@ export function latestRsvpByGuestId(rsvps: Rsvp[]): Map<string, Rsvp> {
   return map;
 }
 
-export type GuestInput = Omit<Guest, "rowIndex">;
+/**
+ * Input for upsertGuest. `id` is optional: when omitted the server slugifies
+ * `name` and resolves collisions with a numeric suffix. Provide `id` only when
+ * updating an existing row.
+ */
+export type GuestInput = {
+  id?: string;
+  name: string;
+  plusOnes: number;
+  invitationSent: boolean;
+  contact: string;
+  notes: string;
+};
 
-export async function upsertGuest(auth: string, guest: GuestInput): Promise<void> {
-  await postJson({ action: "upsertGuest", auth, guest });
+export async function upsertGuest(
+  auth: string,
+  guest: GuestInput,
+): Promise<{ id: string; created: boolean }> {
+  return postJson<{ ok: true; created: boolean; id: string }>({
+    action: "upsertGuest",
+    auth,
+    guest,
+  }).then((r) => ({ id: r.id, created: r.created }));
 }
 
 export async function deleteGuest(auth: string, id: string): Promise<void> {

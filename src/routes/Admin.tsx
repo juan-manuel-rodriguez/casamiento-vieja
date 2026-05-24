@@ -18,11 +18,11 @@ type ViewState =
   | { kind: "ready"; guests: Guest[]; latestByGuest: Map<string, Rsvp> }
   | { kind: "error"; message: string };
 
-const EMPTY_INPUT: GuestInput = {
-  id: "",
+type NewGuestDraft = Omit<GuestInput, "id" | "invitationSent">;
+
+const EMPTY_DRAFT: NewGuestDraft = {
   name: "",
   plusOnes: 0,
-  invitationSent: false,
   contact: "",
   notes: "",
 };
@@ -32,7 +32,7 @@ export function AdminPage() {
   const [view, setView] = useState<ViewState>(
     auth ? { kind: "loading" } : { kind: "needs-passphrase" },
   );
-  const [draft, setDraft] = useState<GuestInput>(EMPTY_INPUT);
+  const [draft, setDraft] = useState<NewGuestDraft>(EMPTY_DRAFT);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
 
@@ -108,13 +108,12 @@ export function AdminPage() {
   async function handleSubmitDraft(event: React.FormEvent) {
     event.preventDefault();
     if (!auth) return;
-    const id = draft.id.trim();
     const name = draft.name.trim();
-    if (!id || !name) return;
+    if (!name) return;
     setSaving(true);
     try {
-      await upsertGuest(auth, { ...draft, id, name });
-      setDraft(EMPTY_INPUT);
+      await upsertGuest(auth, { ...draft, name, invitationSent: false });
+      setDraft(EMPTY_DRAFT);
       await refresh();
     } catch (err) {
       setView({ kind: "error", message: errorMessage(err) });
@@ -167,15 +166,6 @@ export function AdminPage() {
         </summary>
         <form onSubmit={handleSubmitDraft}>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 mt-6">
-            <DraftField label="ID (slug)" required>
-              <input
-                className="admin-input"
-                placeholder="juan-perez"
-                value={draft.id}
-                onChange={(e) => setDraft({ ...draft, id: e.target.value })}
-                required
-              />
-            </DraftField>
             <DraftField label="Nombre" required>
               <input
                 className="admin-input"
@@ -215,7 +205,7 @@ export function AdminPage() {
             <button
               type="button"
               className="btn-ghost"
-              onClick={() => setDraft(EMPTY_INPUT)}
+              onClick={() => setDraft(EMPTY_DRAFT)}
               disabled={saving}
             >
               Limpiar
@@ -328,7 +318,7 @@ function Stats({ guests, latestByGuest }: { guests: Guest[]; latestByGuest: Map<
   return (
     <section className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 mb-10">
       <StatCard label="Invitados" value={stats.total} />
-      <StatCard label="Invitaciones enviadas" value={stats.invitationsSent} sub={`de ${stats.total}`} />
+      <StatCard label="Invitaciones enviadas" value={stats.invitationsSent} total={stats.total} />
       <StatCard label="Aceptaron" value={stats.accepted.length} />
       <StatCard label="No pueden" value={stats.declined.length} />
       <StatCard label="Sin responder" value={stats.pending} />
@@ -340,23 +330,27 @@ function Stats({ guests, latestByGuest }: { guests: Guest[]; latestByGuest: Map<
 function StatCard({
   label,
   value,
-  sub,
+  total,
   accent,
 }: {
   label: string;
   value: number;
-  sub?: string;
+  total?: number;
   accent?: boolean;
 }) {
   return (
     <div
-      className={`border rounded-lg p-5 shadow-sm flex flex-col gap-2 ${
+      className={`border rounded-lg p-5 shadow-sm flex flex-col gap-3 ${
         accent ? "bg-soft border-sand" : "bg-white border-bone"
       }`}
     >
       <span className="text-[0.78rem] uppercase tracking-[0.16em] text-subtle">{label}</span>
-      <span className="font-display text-3xl leading-none text-ink">{value}</span>
-      {sub && <span className="text-sm text-muted">{sub}</span>}
+      <span className="font-sans leading-none text-ink tabular-nums flex items-baseline gap-1">
+        <span className="text-4xl font-semibold">{value}</span>
+        {total != null && (
+          <span className="text-xl font-medium text-subtle">/ {total}</span>
+        )}
+      </span>
     </div>
   );
 }

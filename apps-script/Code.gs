@@ -235,33 +235,70 @@ function handleSubmitRsvp_(params) {
   }
   var comment = params.comment == null ? '' : String(params.comment);
 
-  var sheet = sheetByName_(RSVPS_TAB);
-  sheet.appendRow([new Date(), id, response, partySize, comment]);
-  return { ok: true };
+  return withWriteLock_(function () {
+    sheetByName_(RSVPS_TAB).appendRow([new Date(), id, response, partySize, comment]);
+    return { ok: true };
+  });
 }
 
 /**
+ * Upsert by id. If id is empty, generate a random UUID so guest links can't
+ * be guessed from names. Serialized via the script lock so concurrent writes
+ * can't collide on row indexes.
  * @param {Object} params
- * @returns {{ok: true, created: boolean}}
+ * @returns {{ok: true, created: boolean, id: string}}
  */
 function handleUpsertGuest_(params) {
   var input = params.guest || {};
-  var id = requireString_(input, 'id');
   var name = requireString_(input, 'name');
+  var providedId = String(input.id || '').trim();
   var plusOnes = Math.max(0, Math.round(Number(input.plusOnes) || 0));
   var invitationSent = Boolean(input.invitationSent);
   var contact = input.contact == null ? '' : String(input.contact);
   var notes = input.notes == null ? '' : String(input.notes);
 
-  var row = [id, name, plusOnes, invitationSent, contact, notes];
-  var sheet = sheetByName_(GUESTS_TAB);
-  var existing = findGuestById_(id);
-  if (existing) {
-    sheet.getRange(existing.rowIndex, 1, 1, row.length).setValues([row]);
-    return { ok: true, created: false };
+  return withWriteLock_(function () {
+    var sheet = sheetByName_(GUESTS_TAB);
+    var list = readGuests_();
+    var id = providedId || Utilities.getUuid();
+    var existing = findInList_(list, id);
+    var row = [id, name, plusOnes, invitationSent, contact, notes];
+    if (existing) {
+      sheet.getRange(existing.rowIndex, 1, 1, row.length).setValues([row]);
+      return { ok: true, created: false, id: id };
+    }
+    sheet.appendRow(row);
+    return { ok: true, created: true, id: id };
+  });
+}
+
+/**
+ * @param {Array<Guest>} list
+ * @param {string} id
+ * @returns {Guest|null}
+ */
+function findInList_(list, id) {
+  for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+  return null;
+}
+
+/**
+ * Serialize writes through the script lock. Apps Script does not guarantee
+ * isolation between concurrent doPost invocations, so we wrap any
+ * read-modify-write sequence in here to avoid races on id generation and
+ * row indexes.
+ * @template T
+ * @param {function(): T} work
+ * @returns {T}
+ */
+function withWriteLock_(work) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) throw new Error('servidor ocupado, reintentá');
+  try {
+    return work();
+  } finally {
+    lock.releaseLock();
   }
-  sheet.appendRow(row);
-  return { ok: true, created: true };
 }
 
 /**
@@ -270,10 +307,12 @@ function handleUpsertGuest_(params) {
  */
 function handleDeleteGuest_(params) {
   var id = requireString_(params, 'id');
-  var guest = findGuestById_(id);
-  if (!guest) return { ok: true, deleted: false };
-  sheetByName_(GUESTS_TAB).deleteRow(guest.rowIndex);
-  return { ok: true, deleted: true };
+  return withWriteLock_(function () {
+    var guest = findGuestById_(id);
+    if (!guest) return { ok: true, deleted: false };
+    sheetByName_(GUESTS_TAB).deleteRow(guest.rowIndex);
+    return { ok: true, deleted: true };
+  });
 }
 
 // ---------- IO helpers ----------

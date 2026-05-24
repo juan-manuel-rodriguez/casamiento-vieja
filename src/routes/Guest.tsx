@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { fetchPublicGuest, type PublicGuest } from "../api/guests";
 import { submitRsvp, type RsvpResponse } from "../api/rsvp";
@@ -140,10 +140,6 @@ function Hero({ photoStyle }: { photoStyle?: React.CSSProperties }) {
         <span className="hidden sm:inline" aria-hidden="true">·</span>
         <span>{EVENT.venue}</span>
       </p>
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-[0.78rem] uppercase tracking-[0.25em] text-subtle flex flex-col items-center gap-2">
-        Desliz&aacute;
-        <span className="w-px h-9 bg-sand" />
-      </div>
     </header>
   );
 }
@@ -177,16 +173,17 @@ function EventDetails() {
           {EVENT.address && <p className="text-sm text-muted m-0">{EVENT.address}</p>}
           {EVENT.mapUrl && (
             <a
-              className="mt-2 text-sm text-gold-dark underline underline-offset-4 decoration-soft hover:decoration-ink hover:text-ink transition-colors"
+              className="mt-2 inline-flex items-center gap-1.5 text-sm text-gold-dark hover:text-ink transition-colors no-underline"
               href={EVENT.mapUrl}
               target="_blank"
               rel="noreferrer noopener"
             >
-              Cómo llegar →
+              <MapPinIcon />
+              Cómo llegar
             </a>
           )}
         </DetailTile>
-        <DetailTile eyebrow="Dress code" title={EVENT.dressCode} />
+        <DressCodeTile />
         <DetailTile eyebrow="Confirmar antes del" title={EVENT.rsvpDeadline}>
           <p className="text-sm text-muted m-0">Para que podamos organizar todo a tiempo.</p>
         </DetailTile>
@@ -436,6 +433,167 @@ function ThankYouState({ response }: { response: RsvpResponse }) {
     <StatusBlock eyebrow="Gracias por avisarnos" title="Te vamos a extrañar">
       <p>Recibimos tu respuesta. Si algo cambia, abrí de nuevo el link y avisanos.</p>
     </StatusBlock>
+  );
+}
+
+function DressCodeTile() {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const women: readonly string[] = EVENT.dressCodeWomen ?? [];
+  const men: readonly string[] = EVENT.dressCodeMen ?? [];
+  const avoid: readonly string[] = EVENT.dressCodeAvoid ?? [];
+  const description = EVENT.dressCodeDescription ?? "";
+  const hasDetails =
+    description.length > 0 || women.length > 0 || men.length > 0 || avoid.length > 0;
+
+  function open() {
+    dialogRef.current?.showModal();
+  }
+  function close() {
+    dialogRef.current?.close();
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={open}
+        className="bg-white border border-bone rounded-lg p-6 shadow-sm flex flex-col gap-2 text-left transition-colors hover:bg-cream/40 focus:outline-none focus:border-gold cursor-pointer"
+      >
+        <span className="text-[0.78rem] uppercase tracking-[0.22em] text-subtle font-medium">
+          Dress code
+        </span>
+        <h3 className="font-display text-2xl m-0 text-ink">{EVENT.dressCode}</h3>
+        {hasDetails && (
+          <span className="mt-2 inline-flex items-center gap-1.5 text-sm text-gold-dark">
+            Ver detalles
+          </span>
+        )}
+      </button>
+
+      <dialog
+        ref={dialogRef}
+        onClick={(e) => {
+          if (e.target === dialogRef.current) close();
+        }}
+        className="bg-transparent p-0 m-auto backdrop:bg-ink/40 backdrop:backdrop-blur-sm"
+      >
+        <div className="bg-white border border-bone rounded-2xl shadow-lg w-[min(520px,92vw)] max-h-[92vh] overflow-y-auto p-8 text-left">
+          <div className="flex items-start justify-between gap-4 mb-4">
+            <div>
+              <span className="text-[0.78rem] uppercase tracking-[0.22em] text-subtle font-medium">
+                Dress code
+              </span>
+              <h3 className="font-display italic text-3xl m-0 text-ink mt-1">
+                {EVENT.dressCode}
+              </h3>
+            </div>
+            <button
+              type="button"
+              onClick={close}
+              aria-label="Cerrar"
+              className="text-subtle hover:text-ink text-2xl leading-none -mt-1 -mr-1 px-2 cursor-pointer"
+            >
+              ×
+            </button>
+          </div>
+
+          {description && <p className="text-muted text-sm mb-6">{description}</p>}
+
+          {women.length > 0 && (
+            <DressCodeSection title="Ellas" items={women} variant="yes" />
+          )}
+          {men.length > 0 && (
+            <DressCodeSection title="Ellos" items={men} variant="yes" />
+          )}
+          {avoid.length > 0 && (
+            <DressCodeSection title="Mejor evitar" items={avoid} variant="no" />
+          )}
+
+          <button type="button" onClick={close} className="btn-primary w-full mt-2">
+            Entendido
+          </button>
+        </div>
+      </dialog>
+    </>
+  );
+}
+
+function DressCodeSection({
+  title,
+  items,
+  variant,
+}: {
+  title: string;
+  items: readonly string[];
+  variant: "yes" | "no";
+}) {
+  return (
+    <div className="mb-5">
+      <h4 className="text-[0.78rem] uppercase tracking-[0.18em] text-muted font-medium m-0 mb-3">
+        {title}
+      </h4>
+      <ul className="flex flex-col gap-2 text-ink list-none p-0 m-0">
+        {items.map((item) => (
+          <li key={item} className="flex items-start gap-3 text-sm">
+            {variant === "yes" ? <CheckIcon /> : <ProhibitedIcon />}
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="w-5 h-5 mt-px text-success flex-shrink-0"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M5 12.5l4.5 4.5L19 7" />
+    </svg>
+  );
+}
+
+function ProhibitedIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="w-5 h-5 mt-px text-danger flex-shrink-0"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="9" />
+      <path d="M5.6 5.6l12.8 12.8" />
+    </svg>
+  );
+}
+
+function MapPinIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="w-4 h-4 -mt-px"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
+      <circle cx="12" cy="10" r="3" />
+    </svg>
   );
 }
 
