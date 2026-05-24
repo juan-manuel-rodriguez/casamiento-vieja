@@ -1,66 +1,50 @@
 # Casamiento RSVP
 
-App estática (React + Vite) para que los invitados confirmen asistencia y vos
-veas el resumen desde un admin protegido por Google.
+App estática (React + Vite + Tailwind) para que los invitados confirmen
+asistencia y vos veas el resumen desde un admin protegido con una contraseña
+compartida.
 
 ## Arquitectura
 
 - **Frontend**: React + Vite, dos rutas: `/?id=XXX` (invitado) y `/admin`.
 - **Backend**: un Google Apps Script "container-bound" al Sheet, deployado como
-  Web App. Maneja lecturas públicas mínimas, escritura de RSVPs y CRUD de
-  invitados (este último validando el OAuth token contra `ADMIN_EMAILS`).
-- **Auth admin**: Google Identity Services (OAuth implicit) en el browser. El
-  token se manda al Apps Script, que verifica el email contra su lista de
-  admins.
+  Web App. Maneja la lectura pública del invitado, la escritura del RSVP, y el
+  CRUD del admin (este último validando una contraseña compartida).
 
-No hay servidor propio. El hosting puede ser cualquier estático (GitHub Pages,
-Netlify, Vercel).
+Sin servidores propios. Sin Google Cloud. El hosting puede ser cualquier
+estático (GitHub Pages, Netlify, Vercel).
 
 ## Setup (una sola vez)
 
 ### 1. Apps Script
 
-1. Abrí el Sheet → **Extensiones** → **Apps Script**.
+1. Abrí el Sheet → **Extensiones → Apps Script**.
 2. Borrá el archivo de ejemplo y pegá el contenido de
    [`apps-script/Code.gs`](apps-script/Code.gs).
-3. Editá la constante `ADMIN_EMAILS` adentro del script con tus emails.
-4. Guardá. Ejecutá la función `setup` una vez (te va a pedir permisos: aceptá).
-   Eso crea las pestañas `invitados` y `respuestas` con los headers correctos.
-5. **Deploy** → **New deployment** → tipo **Web app**.
+3. Cambiá la constante `ADMIN_PASSPHRASE` por una palabra que solo vos sepas.
+4. Guardá (💾). Elegí la función `setup` en el dropdown y dale **Run** (▶).
+   Te va a pedir permisos la primera vez: aceptá. Eso crea las pestañas
+   `guests` y `rsvps` con los headers correctos.
+5. **Deploy → New deployment** → ⚙️ → **Web app**:
    - Execute as: **Me**
    - Who has access: **Anyone**
-6. Copiá la URL (termina en `/exec`) — la vas a pegar en `src/config.ts` como
-   `APPS_SCRIPT_URL`.
+6. Copiá la **Web app URL** (termina en `/exec`) y pegala en `src/config.ts`
+   como `APPS_SCRIPT_URL`.
 
-Cuando cambies `Code.gs` después, hay que ir a **Deploy → Manage deployments →
-Edit → New version** para que la URL pública sirva el código nuevo.
+Cuando cambies `Code.gs` después: **Deploy → Manage deployments → Edit → New
+version → Deploy**. La URL se mantiene igual.
 
-### 2. OAuth Client (solo para la vista admin)
+### 2. Configurar la app
 
-1. [Google Cloud Console](https://console.cloud.google.com/) → crear (o reusar)
-   un proyecto.
-2. **APIs & Services → OAuth consent screen** → External, completar nombre y
-   email. No hace falta publicar (queda en "Testing"); agregá tu email como
-   test user.
-3. **APIs & Services → Credentials → Create credentials → OAuth client ID** →
-   tipo **Web application**. En "Authorized JavaScript origins" agregá las
-   URLs desde donde vas a servir la app (ej. `http://localhost:5173` para dev,
-   y la URL del hosting).
-4. Copiá el Client ID → va en `src/config.ts` como `GOOGLE_CLIENT_ID`.
-
-### 3. Configurar la app
-
-Editá `src/config.ts`:
+Editá [`src/config.ts`](src/config.ts):
 
 ```ts
 export const APPS_SCRIPT_URL = "https://script.google.com/macros/s/.../exec";
-export const GOOGLE_CLIENT_ID = "....apps.googleusercontent.com";
-export const ADMIN_EMAILS = ["tu-email@gmail.com"]; // sincronizar con Code.gs
-export const EVENTO = {
-  pareja: "Juana & Manuel",
-  fecha: "15 de Marzo, 2026",
-  lugar: "Estancia La Linda",
-  direccion: "Ruta 8, km 42",
+
+export const EVENT = {
+  couple: "Juana & Manuel",
+  date: "15 de marzo de 2026",
+  // …
 };
 ```
 
@@ -68,27 +52,30 @@ export const EVENTO = {
 
 ```bash
 npm install
-npm run dev      # http://localhost:5173
-npm run build    # compila a /dist
+npm run dev      # http://localhost:5173/casamiento/
+npm run build    # genera /dist
 npm run preview  # sirve /dist
 ```
 
+Para ver la página del invitado sin Sheet ni nada cableado, agregá `?demo`:
+`http://localhost:5173/casamiento/?demo`.
+
 ## Uso
 
-- **Cargar invitados**: entrá a `/admin`, login con Google, usá el form
-  "Agregar invitado". O editá el Sheet directamente (el script lee siempre lo
-  último).
+- **Cargar invitados**: entrá a `/admin`, ingresá la contraseña del Apps Script
+  una vez (se guarda en el navegador), usá el form "Agregar invitado". También
+  podés editar el Sheet a mano si querés.
 - **Mandar invitaciones**: click en "Copiar link" en la fila del invitado →
   pegá en WhatsApp/email. El link va a `/?id=<su-id>`.
-- **Ver respuestas**: el panel del admin muestra el resumen y la última
-  respuesta de cada invitado (si responden varias veces, gana la más nueva).
+- **Ver respuestas**: el admin muestra el resumen y la última respuesta de cada
+  invitado.
 
 ## Modelo de datos
 
-Pestaña `invitados`:
+Pestaña `guests`:
 
-| id (string) | nombre | acompanantes (int) | invitacionEnviada (bool) | contacto | notas |
+| id | name | plusOnes (int) | invitationSent (bool) | contact | notes |
 
-Pestaña `respuestas` (la escribe el Apps Script):
+Pestaña `rsvps` (la escribe el Apps Script):
 
-| timestamp | id | respuesta (`acepto`/`no_puedo`) | cantidadConfirmados | comentario |
+| timestamp | guestId | response (`accept`/`decline`) | partySize | comment |

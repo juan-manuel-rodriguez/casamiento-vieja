@@ -5,7 +5,7 @@
  * SETUP (once):
  *   1. Open the Sheet → Extensions → Apps Script.
  *   2. Delete the example file and paste this file as Code.gs.
- *   3. Update ADMIN_EMAILS below with the emails that should manage the list.
+ *   3. Change ADMIN_PASSPHRASE below to a string only you know.
  *   4. Save. Run the `setup` function once (it asks for permissions).
  *      This creates the `guests` and `rsvps` tabs with the correct headers.
  *   5. Deploy → New deployment → Web app.
@@ -33,18 +33,11 @@ var GUESTS_HEADERS = ['id', 'name', 'plusOnes', 'invitationSent', 'contact', 'no
 var RSVPS_HEADERS = ['timestamp', 'guestId', 'response', 'partySize', 'comment'];
 
 /**
- * Emails authorized to call admin-only actions. Keep in sync with
- * ADMIN_EMAILS in src/config.ts.
- * @const {Array<string>}
+ * Shared secret required to call any admin endpoint. Change this to a value
+ * only you know before deploying. Anyone you tell can manage the guest list.
+ * @const {string}
  */
-var ADMIN_EMAILS = ['juanm.rodriguez2@gmail.com'];
-
-/** @const {Object<string, boolean>} */
-var ADMIN_EMAIL_SET = (function () {
-  var set = {};
-  for (var i = 0; i < ADMIN_EMAILS.length; i++) set[ADMIN_EMAILS[i].toLowerCase()] = true;
-  return set;
-})();
+var ADMIN_PASSPHRASE = 'cambiame';
 
 /** @const {string} */ var RESPONSE_ACCEPT = 'accept';
 /** @const {string} */ var RESPONSE_DECLINE = 'decline';
@@ -109,6 +102,10 @@ var HANDLERS_ = {
   },
   submitRsvp: function (params) {
     return handleSubmitRsvp_(params);
+  },
+  checkAuth: function (params) {
+    requireAdmin_(params);
+    return { ok: true };
   },
   listGuests: function (params) {
     requireAdmin_(params);
@@ -192,28 +189,12 @@ function requireInt_(params, key, min, max) {
 // ---------- Auth ----------
 
 /**
- * Verify the caller is an admin by exchanging the provided Google OAuth token
- * for the user's email and checking it against ADMIN_EMAIL_SET. Throws on
- * failure.
+ * Verify the caller knows ADMIN_PASSPHRASE. Throws on failure.
  * @param {Object} params
  */
 function requireAdmin_(params) {
-  var token = requireString_(params, 'token');
-  var resp = UrlFetchApp.fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-    headers: { Authorization: 'Bearer ' + token },
-    muteHttpExceptions: true,
-  });
-  if (resp.getResponseCode() !== 200) throw new Error('invalid token');
-  var info;
-  try {
-    info = JSON.parse(resp.getContentText());
-  } catch (_) {
-    throw new Error('invalid token response');
-  }
-  var email = info && info.email ? String(info.email).toLowerCase() : '';
-  if (!email || !ADMIN_EMAIL_SET[email]) {
-    throw new Error('not an admin: ' + (email || 'unknown'));
-  }
+  var supplied = String(params.auth || '');
+  if (supplied !== ADMIN_PASSPHRASE) throw new Error('invalid passphrase');
 }
 
 // ---------- Handlers ----------

@@ -29,13 +29,17 @@ export async function fetchPublicGuest(id: string): Promise<PublicGuest | null> 
   return response.found && response.guest ? response.guest : null;
 }
 
-export async function listGuests(token: string): Promise<Guest[]> {
-  const response = await postJson<{ guests: Guest[] }>({ action: "listGuests", token });
+export async function checkAuth(auth: string): Promise<void> {
+  await postJson<{ ok: true }>({ action: "checkAuth", auth });
+}
+
+export async function listGuests(auth: string): Promise<Guest[]> {
+  const response = await postJson<{ guests: Guest[] }>({ action: "listGuests", auth });
   return response.guests;
 }
 
-export async function listRsvps(token: string): Promise<Rsvp[]> {
-  const response = await postJson<{ rsvps: Rsvp[] }>({ action: "listRsvps", token });
+export async function listRsvps(auth: string): Promise<Rsvp[]> {
+  const response = await postJson<{ rsvps: Rsvp[] }>({ action: "listRsvps", auth });
   return response.rsvps;
 }
 
@@ -52,10 +56,10 @@ export function latestRsvpByGuestId(rsvps: Rsvp[]): Map<string, Rsvp> {
 
 export type GuestInput = Omit<Guest, "rowIndex">;
 
-export async function upsertGuest(token: string, guest: GuestInput): Promise<void> {
-  await postJson({ action: "upsertGuest", token, guest });
+export async function upsertGuest(auth: string, guest: GuestInput): Promise<void> {
+  await postJson({ action: "upsertGuest", auth, guest });
 }
 
-export async function deleteGuest(token: string, id: string): Promise<void> {
-  await postJson({ action: "deleteGuest", token, id });
+export async function deleteGuest(auth: string, id: string): Promise<void> {
+  await postJson({ action: "deleteGuest", auth, id });
 }

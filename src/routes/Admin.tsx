@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  checkAuth,
   listGuests,
   listRsvps,
   latestRsvpByGuestId,
@@ -9,10 +10,10 @@ import {
   type GuestInput,
   type Rsvp,
 } from "../api/guests";
-import { loadSession, signIn, signOut, type Session } from "../auth/google";
+import { clearPassphrase, loadPassphrase, savePassphrase } from "../auth/passphrase";
 
 type ViewState =
-  | { kind: "needs-login" }
+  | { kind: "needs-passphrase"; error?: string }
   | { kind: "loading" }
   | { kind: "ready"; guests: Guest[]; latestByGuest: Map<string, Rsvp> }
   | { kind: "error"; message: string };
@@ -27,52 +28,66 @@ const EMPTY_INPUT: GuestInput = {
 };
 
 export function AdminPage() {
-  const [session, setSession] = useState<Session | null>(() => loadSession());
+  const [auth, setAuth] = useState<string | null>(() => loadPassphrase());
   const [view, setView] = useState<ViewState>(
-    session ? { kind: "loading" } : { kind: "needs-login" },
+    auth ? { kind: "loading" } : { kind: "needs-passphrase" },
   );
   const [draft, setDraft] = useState<GuestInput>(EMPTY_INPUT);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
 
   useEffect(() => {
-    if (!session) return;
-    void refresh(session);
+    if (!auth) return;
+    void refresh(auth);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session]);
+  }, [auth]);
 
-  async function refresh(activeSession: Session = session!): Promise<void> {
+  async function refresh(activeAuth: string = auth!): Promise<void> {
     setView({ kind: "loading" });
     try {
       const [guests, rsvps] = await Promise.all([
-        listGuests(activeSession.token),
-        listRsvps(activeSession.token),
+        listGuests(activeAuth),
+        listRsvps(activeAuth),
       ]);
       setView({ kind: "ready", guests, latestByGuest: latestRsvpByGuestId(rsvps) });
     } catch (err) {
-      setView({ kind: "error", message: errorMessage(err) });
+      const message = errorMessage(err);
+      if (message.toLowerCase().includes("passphrase")) {
+        clearPassphrase();
+        setAuth(null);
+        setView({ kind: "needs-passphrase", error: "Contraseña incorrecta" });
+        return;
+      }
+      setView({ kind: "error", message });
     }
   }
 
-  async function handleSignIn() {
+  async function handleSubmitPassphrase(value: string) {
+    if (!value.trim()) return;
+    setView({ kind: "loading" });
     try {
-      const next = await signIn();
-      setSession(next);
+      await checkAuth(value);
+      savePassphrase(value);
+      setAuth(value);
     } catch (err) {
-      setView({ kind: "error", message: errorMessage(err) });
+      const message = errorMessage(err);
+      setView({
+        kind: "needs-passphrase",
+        error: message.toLowerCase().includes("passphrase") ? "Contraseña incorrecta" : message,
+      });
     }
   }
 
   function handleSignOut() {
-    signOut();
-    setSession(null);
-    setView({ kind: "needs-login" });
+    clearPassphrase();
+    setAuth(null);
+    setView({ kind: "needs-passphrase" });
   }
 
   async function toggleInvitationSent(guest: Guest) {
-    if (!session) return;
+    if (!auth) return;
     try {
-      await upsertGuest(session.token, { ...guest, invitationSent: !guest.invitationSent });
+      await upsertGuest(auth, { ...guest, invitationSent: !guest.invitationSent });
       await refresh();
     } catch (err) {
       setView({ kind: "error", message: errorMessage(err) });
@@ -80,10 +95,10 @@ export function AdminPage() {
   }
 
   async function handleDelete(guest: Guest) {
-    if (!session) return;
+    if (!auth) return;
     if (!confirm(`¿Eliminar a ${guest.name}?`)) return;
     try {
-      await deleteGuest(session.token, guest.id);
+      await deleteGuest(auth, guest.id);
       await refresh();
     } catch (err) {
       setView({ kind: "error", message: errorMessage(err) });
@@ -92,13 +107,13 @@ export function AdminPage() {
 
   async function handleSubmitDraft(event: React.FormEvent) {
     event.preventDefault();
-    if (!session) return;
+    if (!auth) return;
     const id = draft.id.trim();
     const name = draft.name.trim();
     if (!id || !name) return;
     setSaving(true);
     try {
-      await upsertGuest(session.token, { ...draft, id, name });
+      await upsertGuest(auth, { ...draft, id, name });
       setDraft(EMPTY_INPUT);
       await refresh();
     } catch (err) {
@@ -113,20 +128,11 @@ export function AdminPage() {
     void navigator.clipboard.writeText(`${base}?id=${id}`);
   }
 
-  if (view.kind === "needs-login") {
-    return (
-      <EmptyAdminState eyebrow="Acceso" title="Panel de administración">
-        <p>Iniciá sesión con la cuenta de Google autorizada para gestionar la lista de invitados.</p>
-        <button className="btn-primary mt-6" onClick={handleSignIn}>
-          Iniciar sesión con Google
-        </button>
-      </EmptyAdminState>
-    );
+  if (view.kind === "needs-passphrase") {
+    return <PassphraseGate error={view.error} onSubmit={handleSubmitPassphrase} />;
   }
   if (view.kind === "loading") {
-    return (
-      <EmptyAdminState eyebrow="Un momento" title="Cargando…" />
-    );
+    return <EmptyAdminState eyebrow="Un momento" title="Cargando…" />;
   }
   if (view.kind === "error") {
     return (
@@ -135,14 +141,11 @@ export function AdminPage() {
           {view.message}
         </div>
         <div className="flex gap-3 mt-6">
-          <button
-            className="btn-primary"
-            onClick={() => (session ? void refresh() : void handleSignIn())}
-          >
+          <button className="btn-primary" onClick={() => void refresh()}>
             Reintentar
           </button>
           <button className="btn-ghost" onClick={handleSignOut}>
-            Cerrar sesión
+            Salir
           </button>
         </div>
       </EmptyAdminState>
@@ -152,7 +155,7 @@ export function AdminPage() {
   const { guests, latestByGuest } = view;
   return (
     <main className="max-w-6xl mx-auto px-6 py-8 pb-24 font-sans">
-      <Topbar email={session!.email} onRefresh={() => void refresh()} onSignOut={handleSignOut} />
+      <Topbar onRefresh={() => void refresh()} onSignOut={handleSignOut} />
       <Stats guests={guests} latestByGuest={latestByGuest} />
 
       <details className="bg-white border border-bone rounded-lg p-6 mb-8 shadow-sm group">
@@ -247,20 +250,56 @@ export function AdminPage() {
 
 /* ---------- Subcomponents ---------- */
 
-function Topbar({
-  email,
-  onRefresh,
-  onSignOut,
+function PassphraseGate({
+  error,
+  onSubmit,
 }: {
-  email: string;
-  onRefresh: () => void;
-  onSignOut: () => void;
+  error?: string;
+  onSubmit: (value: string) => void;
 }) {
+  const [value, setValue] = useState("");
+  return (
+    <main className="min-h-[80vh] flex flex-col items-center justify-center text-center px-6 py-12 gap-4 font-sans">
+      <p className="text-[0.78rem] uppercase tracking-[0.22em] text-muted font-medium m-0">
+        Acceso
+      </p>
+      <h1 className="font-display italic text-4xl sm:text-5xl m-0">Panel de administración</h1>
+      <p className="text-muted max-w-md">
+        Ingresá la contraseña que pusiste en el Apps Script para gestionar la lista.
+      </p>
+      <form
+        className="flex flex-col items-stretch gap-3 w-full max-w-sm"
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSubmit(value);
+        }}
+      >
+        <input
+          type="password"
+          autoFocus
+          className="admin-input text-center text-lg"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="contraseña"
+        />
+        {error && (
+          <div className="px-4 py-3 rounded bg-danger-soft text-danger border border-danger-border text-sm">
+            {error}
+          </div>
+        )}
+        <button className="btn-primary mt-2" type="submit">
+          Entrar
+        </button>
+      </form>
+    </main>
+  );
+}
+
+function Topbar({ onRefresh, onSignOut }: { onRefresh: () => void; onSignOut: () => void }) {
   return (
     <header className="flex flex-wrap items-center justify-between gap-3 pb-6 border-b border-bone mb-8">
       <h1 className="font-display italic text-3xl m-0">Lista de invitados</h1>
       <div className="flex flex-wrap items-center gap-3 text-sm text-muted">
-        <span>{email}</span>
         <button className="btn-ghost" onClick={onRefresh}>
           Refrescar
         </button>
