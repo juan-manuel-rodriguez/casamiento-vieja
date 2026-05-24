@@ -1,28 +1,29 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { loadInvitados, type Invitado } from "../api/sheets";
+import { loadInvitadoPublico, type InvitadoPublico } from "../api/sheets";
 import { submitRsvp } from "../api/form";
 import { EVENTO } from "../config";
 
 type Estado =
   | { kind: "loading" }
   | { kind: "not-found" }
-  | { kind: "ready"; invitado: Invitado }
+  | { kind: "ready"; invitado: InvitadoPublico }
   | { kind: "sent" }
   | { kind: "error"; message: string };
 
 export function Guest() {
   const [params] = useSearchParams();
   const id = params.get("id") ?? "";
-  const [estado, setEstado] = useState<Estado>({ kind: "loading" });
+  const [estado, setEstado] = useState<Estado>(() =>
+    id ? { kind: "loading" } : { kind: "not-found" },
+  );
   const [cantidad, setCantidad] = useState(1);
   const [comentario, setComentario] = useState("");
 
   useEffect(() => {
-    if (!id) return setEstado({ kind: "not-found" });
-    loadInvitados()
-      .then((invitados) => {
-        const inv = invitados.find((i) => i.id === id);
+    if (!id) return;
+    loadInvitadoPublico(id)
+      .then((inv) => {
         if (!inv) return setEstado({ kind: "not-found" });
         setCantidad(inv.acompanantes + 1);
         setEstado({ kind: "ready", invitado: inv });

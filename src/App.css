@@ -133,3 +133,27 @@ table.invitados td {
 }
 table.invitados th { background: #f1ece1; font-weight: 600; }
 table.invitados tr:last-child td { border-bottom: none; }
+table.invitados td button + button { margin-left: 0.4rem; }
+
+.nuevo-invitado {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.5rem;
+  align-items: end;
+  padding: 1rem;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 1.5rem;
+}
+.nuevo-invitado h2 {
+  grid-column: 1 / -1;
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+}
+.nuevo-invitado input {
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+}

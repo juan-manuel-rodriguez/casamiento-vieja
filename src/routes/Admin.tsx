@@ -3,11 +3,11 @@ import {
   loadInvitados,
   loadRespuestas,
   ultimaRespuestaPorId,
-  updateCell,
+  upsertInvitado,
+  deleteInvitado,
   type Invitado,
   type Respuesta,
 } from "../api/sheets";
-import { TAB_INVITADOS } from "../config";
 import { loadSession, signIn, signOut, type Session } from "../auth/google";
 
 type Estado =
@@ -16,20 +16,38 @@ type Estado =
   | { kind: "ready"; invitados: Invitado[]; respuestas: Map<string, Respuesta> }
   | { kind: "error"; message: string };
 
+type NuevoInvitado = {
+  id: string;
+  nombre: string;
+  acompanantes: number;
+  contacto: string;
+  notas: string;
+};
+
+const NUEVO_VACIO: NuevoInvitado = {
+  id: "",
+  nombre: "",
+  acompanantes: 0,
+  contacto: "",
+  notas: "",
+};
+
 export function Admin() {
   const [session, setSession] = useState<Session | null>(() => loadSession());
   const [estado, setEstado] = useState<Estado>(session ? { kind: "loading" } : { kind: "needs-login" });
+  const [nuevo, setNuevo] = useState<NuevoInvitado>(NUEVO_VACIO);
+  const [guardando, setGuardando] = useState(false);
 
   useEffect(() => {
     if (!session) return;
-    refrescar();
+    refrescar(session);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
 
-  async function refrescar() {
+  async function refrescar(s: Session = session!) {
     setEstado({ kind: "loading" });
     try {
-      const [invitados, respuestas] = await Promise.all([loadInvitados(), loadRespuestas()]);
+      const [invitados, respuestas] = await Promise.all([loadInvitados(s.token), loadRespuestas(s.token)]);
       setEstado({ kind: "ready", invitados, respuestas: ultimaRespuestaPorId(respuestas) });
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Error desconocido";
@@ -56,17 +74,49 @@ export function Admin() {
   async function toggleInvitacion(inv: Invitado) {
     if (!session) return;
     try {
-      await updateCell({
-        token: session.token,
-        tab: TAB_INVITADOS,
-        rowIndex: inv.rowIndex,
-        column: "D", // columna invitacionEnviada
-        value: !inv.invitacionEnviada,
-      });
+      await upsertInvitado(session.token, { ...inv, invitacionEnviada: !inv.invitacionEnviada });
       await refrescar();
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Error al guardar";
       setEstado({ kind: "error", message });
+    }
+  }
+
+  async function eliminar(inv: Invitado) {
+    if (!session) return;
+    if (!confirm(`¿Eliminar a ${inv.nombre}?`)) return;
+    try {
+      await deleteInvitado(session.token, inv.id);
+      await refrescar();
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Error al eliminar";
+      setEstado({ kind: "error", message });
+    }
+  }
+
+  async function agregarNuevo(e: React.FormEvent) {
+    e.preventDefault();
+    if (!session) return;
+    const id = nuevo.id.trim();
+    const nombre = nuevo.nombre.trim();
+    if (!id || !nombre) return;
+    setGuardando(true);
+    try {
+      await upsertInvitado(session.token, {
+        id,
+        nombre,
+        acompanantes: nuevo.acompanantes,
+        invitacionEnviada: false,
+        contacto: nuevo.contacto,
+        notas: nuevo.notas,
+      });
+      setNuevo(NUEVO_VACIO);
+      await refrescar();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Error al guardar";
+      setEstado({ kind: "error", message });
+    } finally {
+      setGuardando(false);
     }
   }
 
@@ -110,7 +160,7 @@ export function Admin() {
         <div>
           <span>{session?.email}</span>
           <button onClick={handleSignOut}>Cerrar sesión</button>
-          <button onClick={refrescar}>Refrescar</button>
+          <button onClick={() => refrescar()}>Refrescar</button>
         </div>
       </header>
 
@@ -122,6 +172,42 @@ export function Admin() {
         <div>Sin responder: {sinResponder}</div>
         <div>Personas confirmadas: {totalConfirmados}</div>
       </section>
+
+      <form className="nuevo-invitado" onSubmit={agregarNuevo}>
+        <h2>Agregar invitado</h2>
+        <input
+          placeholder="id (ej. juan-perez)"
+          value={nuevo.id}
+          onChange={(e) => setNuevo({ ...nuevo, id: e.target.value })}
+          required
+        />
+        <input
+          placeholder="Nombre"
+          value={nuevo.nombre}
+          onChange={(e) => setNuevo({ ...nuevo, nombre: e.target.value })}
+          required
+        />
+        <input
+          type="number"
+          min={0}
+          placeholder="Acompañantes"
+          value={nuevo.acompanantes}
+          onChange={(e) => setNuevo({ ...nuevo, acompanantes: Number(e.target.value) })}
+        />
+        <input
+          placeholder="Contacto"
+          value={nuevo.contacto}
+          onChange={(e) => setNuevo({ ...nuevo, contacto: e.target.value })}
+        />
+        <input
+          placeholder="Notas"
+          value={nuevo.notas}
+          onChange={(e) => setNuevo({ ...nuevo, notas: e.target.value })}
+        />
+        <button type="submit" disabled={guardando}>
+          {guardando ? "Guardando…" : "Agregar"}
+        </button>
+      </form>
 
       <table className="invitados">
         <thead>
@@ -154,6 +240,9 @@ export function Admin() {
                 <td>{r?.comentario ?? ""}</td>
                 <td>
                   <button onClick={() => copiarLink(inv.id)}>Copiar link</button>
+                  <button onClick={() => eliminar(inv)} className="secundario">
+                    Eliminar
+                  </button>
                 </td>
               </tr>
             );
