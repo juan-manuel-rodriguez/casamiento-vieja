@@ -1,11 +1,11 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
-// Si el repo se llama "casamiento" la URL queda en /casamiento/.
-// En CI sobreescribimos con BASE_PATH (ej: "/casamiento/") si hace falta.
+// Repo name decides the base path. Override with BASE_PATH in CI if needed.
 const base = process.env.BASE_PATH ?? "/casamiento/";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   base,
 });

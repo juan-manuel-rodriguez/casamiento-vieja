@@ -1,49 +1,56 @@
 import { APPS_SCRIPT_URL } from "../config";
 
-// Llamadas al Web App de Apps Script. Convención:
-// - GET para lecturas públicas (devuelve JSON).
-// - POST con Content-Type "text/plain" para escrituras y lecturas admin.
-//   El text/plain es a propósito: evita el preflight CORS, y el script
-//   parsea el body como JSON en `e.postData.contents`.
+// Apps Script Web App client. Conventions:
+// - GET for public reads (params in the query string).
+// - POST with Content-Type "text/plain" for writes and admin reads. The
+//   text/plain content type sidesteps CORS preflight, and the script parses
+//   the JSON body from e.postData.contents.
 
-type ApiPayload = Record<string, unknown>;
+type RequestPayload = Record<string, unknown>;
 
-async function call<T>(payload: ApiPayload, method: "GET" | "POST"): Promise<T> {
+function ensureConfigured(): void {
   if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.startsWith("REEMPLAZAR")) {
-    throw new Error("Falta configurar APPS_SCRIPT_URL en src/config.ts");
+    throw new Error("APPS_SCRIPT_URL no está configurado en src/config.ts");
   }
+}
+
+async function call<T>(payload: RequestPayload, method: "GET" | "POST"): Promise<T> {
+  ensureConfigured();
   let url = APPS_SCRIPT_URL;
   let init: RequestInit = { method };
   if (method === "GET") {
     const params = new URLSearchParams();
-    for (const [k, v] of Object.entries(payload)) params.set(k, String(v ?? ""));
+    for (const [key, value] of Object.entries(payload)) {
+      params.set(key, value == null ? "" : String(value));
+    }
     url = `${APPS_SCRIPT_URL}?${params.toString()}`;
   } else {
     init = {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify(payload),
+      redirect: "follow",
     };
   }
-  const res = await fetch(url, init);
-  const text = await res.text();
+  const response = await fetch(url, init);
+  const text = await response.text();
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new Error(`Respuesta inválida del backend: ${text.slice(0, 200)}`);
+    throw new Error(`Respuesta inválida del servidor: ${text.slice(0, 200)}`);
   }
-  if (typeof parsed === "object" && parsed && "error" in parsed) {
-    const err = (parsed as { error: unknown }).error;
-    throw new Error(typeof err === "string" ? err : "Error del backend");
+  if (typeof parsed === "object" && parsed !== null && "error" in parsed) {
+    const error = (parsed as { error: unknown }).error;
+    throw new Error(typeof error === "string" ? error : "Error desconocido");
   }
   return parsed as T;
 }
 
-export function apiGet<T>(payload: ApiPayload): Promise<T> {
+export function getJson<T>(payload: RequestPayload): Promise<T> {
   return call<T>(payload, "GET");
 }
 
-export function apiPost<T>(payload: ApiPayload): Promise<T> {
+export function postJson<T>(payload: RequestPayload): Promise<T> {
   return call<T>(payload, "POST");
 }

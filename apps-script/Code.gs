@@ -1,237 +1,406 @@
-// Backend de la app de casamiento, corriendo como Google Apps Script Web App
-// pegado al Sheet (container-bound).
-//
-// Setup (una vez):
-//   1. Abrir el Sheet → Extensiones → Apps Script.
-//   2. Borrar el archivo de ejemplo y pegar este archivo como `Code.gs`.
-//   3. Guardar. Ejecutar la función `setup` una vez (te va a pedir permisos).
-//      Eso crea las pestañas `invitados` y `respuestas` con los headers correctos.
-//   4. Deploy → New deployment → Type: Web app.
-//        - Execute as: Me (tu cuenta)
-//        - Who has access: Anyone
-//      Copiar la URL que te da y pegarla en src/config.ts como APPS_SCRIPT_URL.
-//   5. Cada vez que cambies este archivo, hay que hacer Deploy → Manage deployments
-//      → Edit → New version, para que la URL pública sirva el código nuevo.
-//
-// CORS: los Web App de Apps Script no permiten setear Access-Control-Allow-Origin
-// custom, pero los POST con Content-Type "text/plain" no disparan preflight,
-// así que el frontend manda JSON en el body como string. Los GET tampoco
-// disparan preflight si no agregamos headers raros.
+/**
+ * Backend for the wedding RSVP app. Runs as a Google Apps Script Web App,
+ * container-bound to the Sheet that stores guests and RSVPs.
+ *
+ * SETUP (once):
+ *   1. Open the Sheet → Extensions → Apps Script.
+ *   2. Delete the example file and paste this file as Code.gs.
+ *   3. Update ADMIN_EMAILS below with the emails that should manage the list.
+ *   4. Save. Run the `setup` function once (it asks for permissions).
+ *      This creates the `guests` and `rsvps` tabs with the correct headers.
+ *   5. Deploy → New deployment → Web app.
+ *        - Execute as: Me
+ *        - Who has access: Anyone
+ *      Copy the URL (ends in /exec) into src/config.ts as APPS_SCRIPT_URL.
+ *
+ * When you edit this file, redeploy via Manage deployments → Edit → New version
+ * so the public URL serves the new code.
+ *
+ * CORS notes: Apps Script web apps cannot set custom CORS headers. POST
+ * requests with Content-Type "text/plain" do not trigger a preflight, so the
+ * frontend sends JSON as a text body and we parse it from e.postData.contents.
+ */
 
-const TAB_INVITADOS = 'invitados';
-const TAB_RESPUESTAS = 'respuestas';
+// ---------- Configuration ----------
 
-const HEADERS_INVITADOS = ['id', 'nombre', 'acompanantes', 'invitacionEnviada', 'contacto', 'notas'];
-const HEADERS_RESPUESTAS = ['timestamp', 'id', 'respuesta', 'cantidadConfirmados', 'comentario'];
+/** @const {string} */ var GUESTS_TAB = 'guests';
+/** @const {string} */ var RSVPS_TAB = 'rsvps';
 
-// Emails con permisos para acciones de admin (listar respuestas, CRUD de invitados).
-// Mantener sincronizado con ADMIN_EMAILS en src/config.ts.
-const ADMIN_EMAILS = ['juanm.rodriguez2@gmail.com'];
+/** @const {Array<string>} */
+var GUESTS_HEADERS = ['id', 'name', 'plusOnes', 'invitationSent', 'contact', 'notes'];
 
+/** @const {Array<string>} */
+var RSVPS_HEADERS = ['timestamp', 'guestId', 'response', 'partySize', 'comment'];
+
+/**
+ * Emails authorized to call admin-only actions. Keep in sync with
+ * ADMIN_EMAILS in src/config.ts.
+ * @const {Array<string>}
+ */
+var ADMIN_EMAILS = ['juanm.rodriguez2@gmail.com'];
+
+/** @const {Object<string, boolean>} */
+var ADMIN_EMAIL_SET = (function () {
+  var set = {};
+  for (var i = 0; i < ADMIN_EMAILS.length; i++) set[ADMIN_EMAILS[i].toLowerCase()] = true;
+  return set;
+})();
+
+/** @const {string} */ var RESPONSE_ACCEPT = 'accept';
+/** @const {string} */ var RESPONSE_DECLINE = 'decline';
+
+// ---------- Public bootstrap ----------
+
+/**
+ * Idempotent setup. Creates the `guests` and `rsvps` tabs and writes headers
+ * if they are missing. Safe to call repeatedly.
+ */
 function setup() {
-  ensureSheet_(TAB_INVITADOS, HEADERS_INVITADOS);
-  ensureSheet_(TAB_RESPUESTAS, HEADERS_RESPUESTAS);
+  ensureSheetWithHeaders_(GUESTS_TAB, GUESTS_HEADERS);
+  ensureSheetWithHeaders_(RSVPS_TAB, RSVPS_HEADERS);
 }
 
-function ensureSheet_(name, headers) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let sheet = ss.getSheetByName(name);
-  if (!sheet) sheet = ss.insertSheet(name);
-  const firstRow = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
-  const needsHeaders = headers.some((h, i) => firstRow[i] !== h);
-  if (needsHeaders) {
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    sheet.setFrozenRows(1);
-  }
-}
+// ---------- Router ----------
 
-// --- Router ---
-
+/**
+ * @param {GoogleAppsScript.Events.DoGet} e
+ * @returns {GoogleAppsScript.Content.TextOutput}
+ */
 function doGet(e) {
   return route_('GET', e);
 }
 
+/**
+ * @param {GoogleAppsScript.Events.DoPost} e
+ * @returns {GoogleAppsScript.Content.TextOutput}
+ */
 function doPost(e) {
   return route_('POST', e);
 }
 
+/**
+ * Dispatch a request to the right handler based on the `action` parameter.
+ * @param {'GET'|'POST'} method
+ * @param {GoogleAppsScript.Events.AppsScriptHttpRequestEvent} e
+ * @returns {GoogleAppsScript.Content.TextOutput}
+ */
 function route_(method, e) {
   try {
-    setup(); // bootstrap idempotente, barato
-    const params = parseParams_(method, e);
-    const action = params.action;
-    if (!action) return json_({ error: 'missing action' }, 400);
-
-    switch (action) {
-      case 'getInvitado':
-        return json_(getInvitado_(params.id));
-      case 'submitRsvp':
-        return json_(submitRsvp_(params));
-      case 'listInvitados':
-        requireAdmin_(params);
-        return json_(listInvitados_());
-      case 'listRespuestas':
-        requireAdmin_(params);
-        return json_(listRespuestas_());
-      case 'upsertInvitado':
-        requireAdmin_(params);
-        return json_(upsertInvitado_(params));
-      case 'deleteInvitado':
-        requireAdmin_(params);
-        return json_(deleteInvitado_(params.id));
-      default:
-        return json_({ error: 'unknown action: ' + action }, 400);
-    }
+    setup(); // cheap, idempotent
+    var params = parseRequest_(method, e);
+    var action = String(params.action || '');
+    var handler = HANDLERS_[action];
+    if (!handler) return jsonResponse_({ error: 'unknown action: ' + action });
+    return jsonResponse_(handler(params));
   } catch (err) {
-    return json_({ error: String((err && err.message) || err) }, 500);
+    var message = (err && err.message) ? err.message : String(err);
+    return jsonResponse_({ error: message });
   }
 }
 
-function parseParams_(method, e) {
+/**
+ * Map of action name to handler. Handlers receive parsed params and return a
+ * plain object that is serialized as JSON. Admin-gated handlers call
+ * requireAdmin_(params) themselves before doing any work.
+ */
+var HANDLERS_ = {
+  getGuest: function (params) {
+    return handleGetGuest_(params);
+  },
+  submitRsvp: function (params) {
+    return handleSubmitRsvp_(params);
+  },
+  listGuests: function (params) {
+    requireAdmin_(params);
+    return { guests: readGuests_() };
+  },
+  listRsvps: function (params) {
+    requireAdmin_(params);
+    return { rsvps: readRsvps_() };
+  },
+  upsertGuest: function (params) {
+    requireAdmin_(params);
+    return handleUpsertGuest_(params);
+  },
+  deleteGuest: function (params) {
+    requireAdmin_(params);
+    return handleDeleteGuest_(params);
+  },
+};
+
+// ---------- Request parsing ----------
+
+/**
+ * @param {'GET'|'POST'} method
+ * @param {GoogleAppsScript.Events.AppsScriptHttpRequestEvent} e
+ * @returns {Object<string, *>}
+ */
+function parseRequest_(method, e) {
   if (method === 'POST' && e && e.postData && e.postData.contents) {
     try {
-      return JSON.parse(e.postData.contents);
+      return JSON.parse(e.postData.contents) || {};
     } catch (_) {
-      // fallthrough: tal vez vino como form-urlencoded
+      // fall through to form-encoded
     }
   }
   return (e && e.parameter) ? e.parameter : {};
 }
 
-function json_(payload, status) {
-  const out = ContentService.createTextOutput(JSON.stringify(payload));
-  out.setMimeType(ContentService.MimeType.JSON);
-  return out;
+/**
+ * @param {*} payload
+ * @returns {GoogleAppsScript.Content.TextOutput}
+ */
+function jsonResponse_(payload) {
+  var output = ContentService.createTextOutput(JSON.stringify(payload));
+  output.setMimeType(ContentService.MimeType.JSON);
+  return output;
 }
 
-// --- Auth ---
+// ---------- Validation ----------
 
+/**
+ * Read a non-empty string param or throw.
+ * @param {Object} params
+ * @param {string} key
+ * @returns {string}
+ */
+function requireString_(params, key) {
+  var value = params[key];
+  if (value == null) throw new Error('missing field: ' + key);
+  var trimmed = String(value).trim();
+  if (!trimmed) throw new Error('empty field: ' + key);
+  return trimmed;
+}
+
+/**
+ * Read an integer in [min, max] or throw.
+ * @param {Object} params
+ * @param {string} key
+ * @param {number} min
+ * @param {number} max
+ * @returns {number}
+ */
+function requireInt_(params, key, min, max) {
+  var raw = params[key];
+  var n = Number(raw);
+  if (!isFinite(n)) throw new Error('invalid number: ' + key);
+  n = Math.round(n);
+  if (n < min || n > max) throw new Error('out of range: ' + key);
+  return n;
+}
+
+// ---------- Auth ----------
+
+/**
+ * Verify the caller is an admin by exchanging the provided Google OAuth token
+ * for the user's email and checking it against ADMIN_EMAIL_SET. Throws on
+ * failure.
+ * @param {Object} params
+ */
 function requireAdmin_(params) {
-  const token = params.token;
-  if (!token) throw new Error('missing token');
-  const resp = UrlFetchApp.fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+  var token = requireString_(params, 'token');
+  var resp = UrlFetchApp.fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
     headers: { Authorization: 'Bearer ' + token },
     muteHttpExceptions: true,
   });
   if (resp.getResponseCode() !== 200) throw new Error('invalid token');
-  const info = JSON.parse(resp.getContentText());
-  if (!info.email || ADMIN_EMAILS.indexOf(info.email) === -1) {
-    throw new Error('not an admin: ' + (info.email || 'unknown'));
+  var info;
+  try {
+    info = JSON.parse(resp.getContentText());
+  } catch (_) {
+    throw new Error('invalid token response');
+  }
+  var email = info && info.email ? String(info.email).toLowerCase() : '';
+  if (!email || !ADMIN_EMAIL_SET[email]) {
+    throw new Error('not an admin: ' + (email || 'unknown'));
   }
 }
 
-// --- Lecturas ---
+// ---------- Handlers ----------
 
-function getInvitado_(id) {
-  if (!id) return { found: false };
-  const inv = findInvitadoById_(id);
-  if (!inv) return { found: false };
-  // Para el invitado público devolvemos sólo lo que necesita.
+/**
+ * Public read for the guest page. Returns only the fields the guest needs to
+ * see and never reveals the full list.
+ * @param {Object} params
+ * @returns {{found: boolean, guest?: {id: string, name: string, plusOnes: number}}}
+ */
+function handleGetGuest_(params) {
+  var id = requireString_(params, 'id');
+  var guest = findGuestById_(id);
+  if (!guest) return { found: false };
   return {
     found: true,
-    invitado: { id: inv.id, nombre: inv.nombre, acompanantes: inv.acompanantes },
+    guest: { id: guest.id, name: guest.name, plusOnes: guest.plusOnes },
   };
 }
 
-function listInvitados_() {
-  return { invitados: readSheet_(TAB_INVITADOS, mapInvitadoRow_) };
+/**
+ * @param {Object} params
+ * @returns {{ok: true}}
+ */
+function handleSubmitRsvp_(params) {
+  var id = requireString_(params, 'id');
+  var response = requireString_(params, 'response');
+  if (response !== RESPONSE_ACCEPT && response !== RESPONSE_DECLINE) {
+    throw new Error('invalid response: ' + response);
+  }
+  var guest = findGuestById_(id);
+  if (!guest) throw new Error('guest not found');
+
+  var maxPartySize = guest.plusOnes + 1;
+  var partySize = 0;
+  if (response === RESPONSE_ACCEPT) {
+    partySize = requireInt_(params, 'partySize', 1, maxPartySize);
+  }
+  var comment = params.comment == null ? '' : String(params.comment);
+
+  var sheet = sheetByName_(RSVPS_TAB);
+  sheet.appendRow([new Date(), id, response, partySize, comment]);
+  return { ok: true };
 }
 
-function listRespuestas_() {
-  return { respuestas: readSheet_(TAB_RESPUESTAS, mapRespuestaRow_) };
+/**
+ * @param {Object} params
+ * @returns {{ok: true, created: boolean}}
+ */
+function handleUpsertGuest_(params) {
+  var input = params.guest || {};
+  var id = requireString_(input, 'id');
+  var name = requireString_(input, 'name');
+  var plusOnes = Math.max(0, Math.round(Number(input.plusOnes) || 0));
+  var invitationSent = Boolean(input.invitationSent);
+  var contact = input.contact == null ? '' : String(input.contact);
+  var notes = input.notes == null ? '' : String(input.notes);
+
+  var row = [id, name, plusOnes, invitationSent, contact, notes];
+  var sheet = sheetByName_(GUESTS_TAB);
+  var existing = findGuestById_(id);
+  if (existing) {
+    sheet.getRange(existing.rowIndex, 1, 1, row.length).setValues([row]);
+    return { ok: true, created: false };
+  }
+  sheet.appendRow(row);
+  return { ok: true, created: true };
 }
 
+/**
+ * @param {Object} params
+ * @returns {{ok: true, deleted: boolean}}
+ */
+function handleDeleteGuest_(params) {
+  var id = requireString_(params, 'id');
+  var guest = findGuestById_(id);
+  if (!guest) return { ok: true, deleted: false };
+  sheetByName_(GUESTS_TAB).deleteRow(guest.rowIndex);
+  return { ok: true, deleted: true };
+}
+
+// ---------- IO helpers ----------
+
+/**
+ * @param {string} name
+ * @returns {GoogleAppsScript.Spreadsheet.Sheet}
+ */
+function sheetByName_(name) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
+  if (!sheet) throw new Error('missing sheet: ' + name);
+  return sheet;
+}
+
+/**
+ * @param {string} name
+ * @param {Array<string>} headers
+ */
+function ensureSheetWithHeaders_(name, headers) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(name) || ss.insertSheet(name);
+  var firstRow = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
+  var matches = true;
+  for (var i = 0; i < headers.length; i++) {
+    if (firstRow[i] !== headers[i]) { matches = false; break; }
+  }
+  if (!matches) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.setFrozenRows(1);
+  }
+}
+
+/**
+ * @typedef {{rowIndex: number, id: string, name: string, plusOnes: number,
+ *           invitationSent: boolean, contact: string, notes: string}} Guest
+ */
+
+/**
+ * @typedef {{timestamp: string, guestId: string, response: string,
+ *           partySize: number, comment: string}} Rsvp
+ */
+
+/**
+ * @returns {Array<Guest>}
+ */
+function readGuests_() {
+  return readSheet_(GUESTS_TAB, mapGuestRow_);
+}
+
+/**
+ * @returns {Array<Rsvp>}
+ */
+function readRsvps_() {
+  return readSheet_(RSVPS_TAB, mapRsvpRow_);
+}
+
+/**
+ * @param {string} tab
+ * @param {function(Array<*>, number): *} mapper
+ * @returns {Array<*>}
+ */
 function readSheet_(tab, mapper) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(tab);
-  if (!sheet || sheet.getLastRow() < 2) return [];
-  const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
-  return values.map((row, i) => mapper(row, i + 2));
+  var sheet = sheetByName_(tab);
+  if (sheet.getLastRow() < 2) return [];
+  var values = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
+  var rows = [];
+  for (var i = 0; i < values.length; i++) rows.push(mapper(values[i], i + 2));
+  return rows;
 }
 
-function mapInvitadoRow_(row, rowIndex) {
+/**
+ * @param {Array<*>} row
+ * @param {number} rowIndex
+ * @returns {Guest}
+ */
+function mapGuestRow_(row, rowIndex) {
   return {
     rowIndex: rowIndex,
     id: String(row[0] || ''),
-    nombre: String(row[1] || ''),
-    acompanantes: Number(row[2] || 0),
-    invitacionEnviada: row[3] === true || row[3] === 'TRUE' || row[3] === 'true',
-    contacto: String(row[4] || ''),
-    notas: String(row[5] || ''),
+    name: String(row[1] || ''),
+    plusOnes: Number(row[2] || 0),
+    invitationSent: row[3] === true || row[3] === 'TRUE' || row[3] === 'true',
+    contact: String(row[4] || ''),
+    notes: String(row[5] || ''),
   };
 }
 
-function mapRespuestaRow_(row) {
-  const ts = row[0];
+/**
+ * @param {Array<*>} row
+ * @returns {Rsvp}
+ */
+function mapRsvpRow_(row) {
+  var ts = row[0];
   return {
     timestamp: ts instanceof Date ? ts.toISOString() : String(ts || ''),
-    id: String(row[1] || ''),
-    respuesta: String(row[2] || ''),
-    cantidadConfirmados: Number(row[3] || 0),
-    comentario: String(row[4] || ''),
+    guestId: String(row[1] || ''),
+    response: String(row[2] || ''),
+    partySize: Number(row[3] || 0),
+    comment: String(row[4] || ''),
   };
 }
 
-function findInvitadoById_(id) {
-  const list = readSheet_(TAB_INVITADOS, mapInvitadoRow_);
-  for (let i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+/**
+ * @param {string} id
+ * @returns {Guest|null}
+ */
+function findGuestById_(id) {
+  var list = readGuests_();
+  for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
   return null;
-}
-
-// --- Escrituras ---
-
-function submitRsvp_(params) {
-  const id = String(params.id || '').trim();
-  const respuesta = String(params.respuesta || '');
-  const cantidad = Number(params.cantidadConfirmados || 0);
-  const comentario = String(params.comentario || '');
-
-  if (!id) throw new Error('missing id');
-  if (respuesta !== 'acepto' && respuesta !== 'no_puedo') throw new Error('invalid respuesta');
-
-  const inv = findInvitadoById_(id);
-  if (!inv) throw new Error('invitado no encontrado');
-
-  // El máximo de personas es vos + tus acompañantes.
-  const maxPersonas = inv.acompanantes + 1;
-  const cantidadOk = respuesta === 'acepto' ? Math.max(1, Math.min(maxPersonas, cantidad || 1)) : 0;
-
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TAB_RESPUESTAS);
-  sheet.appendRow([new Date(), id, respuesta, cantidadOk, comentario]);
-  return { ok: true };
-}
-
-function upsertInvitado_(params) {
-  const data = params.invitado || {};
-  const id = String(data.id || '').trim();
-  if (!id) throw new Error('invitado.id es requerido');
-
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TAB_INVITADOS);
-  const list = readSheet_(TAB_INVITADOS, mapInvitadoRow_);
-  const existing = list.find((x) => x.id === id);
-
-  const row = [
-    id,
-    String(data.nombre || ''),
-    Number(data.acompanantes || 0),
-    Boolean(data.invitacionEnviada),
-    String(data.contacto || ''),
-    String(data.notas || ''),
-  ];
-
-  if (existing) {
-    sheet.getRange(existing.rowIndex, 1, 1, row.length).setValues([row]);
-  } else {
-    sheet.appendRow(row);
-  }
-  return { ok: true };
-}
-
-function deleteInvitado_(id) {
-  if (!id) throw new Error('missing id');
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TAB_INVITADOS);
-  const list = readSheet_(TAB_INVITADOS, mapInvitadoRow_);
-  const inv = list.find((x) => x.id === id);
-  if (!inv) return { ok: true, deleted: false };
-  sheet.deleteRow(inv.rowIndex);
-  return { ok: true, deleted: true };
 }

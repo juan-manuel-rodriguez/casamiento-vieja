@@ -1,1 +1,86 @@
-html, body, #root { min-height: 100%; }
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Cormorant Garamond", Georgia, "Times New Roman", serif;
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  --color-ivory: #f8f3ea;
+  --color-cream: #f1ebdd;
+  --color-bone: #e3dac6;
+  --color-sand: #c9bca0;
+  --color-soft: #ead9b8;
+
+  --color-ink: #1f1b16;
+  --color-muted: #6b6357;
+  --color-subtle: #9a9085;
+
+  --color-gold: #9c7a3c;
+  --color-gold-dark: #6e5424;
+
+  --color-success: #325c2a;
+  --color-success-soft: #e6f0e2;
+  --color-success-border: #cfe1c7;
+  --color-danger: #a03333;
+  --color-danger-soft: #fbeded;
+  --color-danger-border: #f1d1d1;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  body {
+    background-color: var(--color-ivory);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+  }
+  ::selection {
+    background: var(--color-soft);
+    color: var(--color-ink);
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply font-sans font-medium text-[0.95rem] tracking-[0.08em] uppercase
+           px-6 py-4 rounded border bg-ink text-ivory border-ink
+           cursor-pointer transition-colors transition-transform duration-200
+           hover:enabled:bg-gold-dark hover:enabled:border-gold-dark
+           active:translate-y-px disabled:opacity-60 disabled:cursor-not-allowed;
+  }
+  .btn-ghost {
+    @apply font-sans font-medium text-[0.95rem] tracking-[0.08em] uppercase
+           px-6 py-4 rounded border bg-transparent text-ink border-sand
+           cursor-pointer transition-colors transition-transform duration-200
+           hover:enabled:bg-cream hover:enabled:border-ink
+           active:translate-y-px disabled:opacity-60 disabled:cursor-not-allowed;
+  }
+  .icon-btn {
+    @apply bg-transparent border border-bone rounded px-3 py-2 text-muted
+           text-[0.78rem] uppercase tracking-[0.14em] cursor-pointer
+           transition-colors hover:bg-cream hover:text-ink;
+  }
+  .icon-btn--danger {
+    @apply hover:bg-danger-soft hover:text-danger hover:border-danger-border;
+  }
+  .admin-input {
+    @apply px-4 py-3 border border-bone rounded bg-ivory text-base font-sans
+           text-ink font-normal normal-case tracking-normal
+           focus:outline-none focus:border-gold;
+  }
+  .admin-checkbox {
+    @apply appearance-none w-5 h-5 border-[1.5px] border-sand rounded
+           bg-white cursor-pointer inline-flex items-center justify-center
+           transition-colors checked:bg-ink checked:border-ink;
+  }
+  .admin-checkbox:checked::after {
+    content: "";
+    width: 6px;
+    height: 10px;
+    border: solid var(--color-ivory);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg) translate(-1px, -1px);
+  }
+}
