@@ -40,5 +40,5 @@ export const EVENT = {
   photoUrl: "",
   rsvpDeadline: "20 de septiembre",
   /** Spotify track URL para el reproductor que se muestra en la página del invitado. */
-  spotifyTrackUrl: "https://open.spotify.com/track/2VxeLyX666F8uXCJ0dZF8B",
+  spotifyTrackUrl: "https://open.spotify.com/track/1mea3bSkSGXuIRvnydlB5b",
 } as const;
