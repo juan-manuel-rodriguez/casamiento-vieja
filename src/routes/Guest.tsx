@@ -266,13 +266,13 @@ function EventDetails() {
           {EVENT.address && <p className="text-sm text-muted m-0">{EVENT.address}</p>}
           {EVENT.mapUrl && (
             <a
-              className="mt-2 inline-flex items-center gap-1.5 text-sm text-gold-dark hover:text-ink transition-colors no-underline"
+              className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-gold-dark underline underline-offset-4 decoration-soft hover:text-ink transition-colors"
               href={EVENT.mapUrl}
               target="_blank"
               rel="noreferrer noopener"
             >
               <MapPinIcon />
-              Cómo llegar
+              ¿Cómo llego?
             </a>
           )}
         </DetailTile>
@@ -590,21 +590,17 @@ function DressCodeTile() {
 
   return (
     <>
-      <button
-        type="button"
-        onClick={open}
-        className="bg-white border border-bone rounded-lg p-6 shadow-sm flex flex-col gap-2 text-left transition-colors hover:bg-cream/40 focus:outline-none focus:border-gold cursor-pointer"
-      >
-        <span className="text-[0.78rem] uppercase tracking-[0.22em] text-subtle font-medium">
-          Dress code
-        </span>
-        <h3 className="font-display text-2xl m-0 text-ink">{EVENT.dressCode}</h3>
+      <DetailTile eyebrow="Dress code" title={EVENT.dressCode}>
         {hasDetails && (
-          <span className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-gold-dark underline underline-offset-4 decoration-soft">
+          <button
+            type="button"
+            onClick={open}
+            className="mt-2 self-start text-sm font-medium text-gold-dark underline underline-offset-4 decoration-soft hover:text-ink transition-colors cursor-pointer bg-transparent border-0 p-0"
+          >
             ¿Qué me pongo?
-          </span>
+          </button>
         )}
-      </button>
+      </DetailTile>
 
       <dialog
         ref={dialogRef}

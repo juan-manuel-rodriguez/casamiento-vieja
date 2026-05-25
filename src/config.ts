@@ -31,7 +31,7 @@ export const EVENT = {
   ],
   dressCodeAvoid: [
     "Pantalón de jean",
-    "Championes u ojotas",
+    "Championes",
     "Remeras informales",
     "Vestido largo de gala o traje de etiqueta",
     "Blanco (es el color de la novia)",
