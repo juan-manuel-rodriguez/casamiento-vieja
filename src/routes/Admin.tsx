@@ -10,19 +10,29 @@ import {
   type GuestInput,
   type Rsvp,
 } from "../api/guests";
+import {
+  listSongRecommendations,
+  type SongRecommendation,
+} from "../api/songs";
 import { clearPassphrase, loadPassphrase, savePassphrase } from "../auth/passphrase";
 
 type ViewState =
   | { kind: "needs-passphrase"; error?: string }
   | { kind: "loading" }
-  | { kind: "ready"; guests: Guest[]; latestByGuest: Map<string, Rsvp> }
+  | {
+      kind: "ready";
+      guests: Guest[];
+      latestByGuest: Map<string, Rsvp>;
+      songRecommendations: SongRecommendation[];
+    }
   | { kind: "error"; message: string };
 
 type NewGuestDraft = Omit<GuestInput, "id" | "invitationSent">;
 
 const EMPTY_DRAFT: NewGuestDraft = {
   name: "",
-  plusOnes: 0,
+  adultSlots: 1,
+  kidSlots: 0,
   contact: "",
   notes: "",
 };
@@ -35,6 +45,17 @@ export function AdminPage() {
   const [draft, setDraft] = useState<NewGuestDraft>(EMPTY_DRAFT);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function withBusy(fn: () => Promise<void>): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await fn();
+    } finally {
+      setBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (!auth) return;
@@ -43,13 +64,21 @@ export function AdminPage() {
   }, [auth]);
 
   async function refresh(activeAuth: string = auth!): Promise<void> {
-    setView({ kind: "loading" });
+    // Don't blank the screen if there's already data on it; the busy overlay
+    // covers the in-flight state.
+    setView((current) => (current.kind === "ready" ? current : { kind: "loading" }));
     try {
-      const [guests, rsvps] = await Promise.all([
+      const [guests, rsvps, songRecommendations] = await Promise.all([
         listGuests(activeAuth),
         listRsvps(activeAuth),
+        listSongRecommendations(activeAuth),
       ]);
-      setView({ kind: "ready", guests, latestByGuest: latestRsvpByGuestId(rsvps) });
+      setView({
+        kind: "ready",
+        guests,
+        latestByGuest: latestRsvpByGuestId(rsvps),
+        songRecommendations,
+      });
     } catch (err) {
       const message = errorMessage(err);
       if (message.toLowerCase().includes("passphrase")) {
@@ -86,23 +115,27 @@ export function AdminPage() {
 
   async function toggleInvitationSent(guest: Guest) {
     if (!auth) return;
-    try {
-      await upsertGuest(auth, { ...guest, invitationSent: !guest.invitationSent });
-      await refresh();
-    } catch (err) {
-      setView({ kind: "error", message: errorMessage(err) });
-    }
+    await withBusy(async () => {
+      try {
+        await upsertGuest(auth, { ...guest, invitationSent: !guest.invitationSent });
+        await refresh();
+      } catch (err) {
+        setView({ kind: "error", message: errorMessage(err) });
+      }
+    });
   }
 
   async function handleDelete(guest: Guest) {
     if (!auth) return;
     if (!confirm(`¿Eliminar a ${guest.name}?`)) return;
-    try {
-      await deleteGuest(auth, guest.id);
-      await refresh();
-    } catch (err) {
-      setView({ kind: "error", message: errorMessage(err) });
-    }
+    await withBusy(async () => {
+      try {
+        await deleteGuest(auth, guest.id);
+        await refresh();
+      } catch (err) {
+        setView({ kind: "error", message: errorMessage(err) });
+      }
+    });
   }
 
   async function handleSubmitDraft(event: React.FormEvent) {
@@ -111,15 +144,17 @@ export function AdminPage() {
     const name = draft.name.trim();
     if (!name) return;
     setSaving(true);
-    try {
-      await upsertGuest(auth, { ...draft, name, invitationSent: false });
-      setDraft(EMPTY_DRAFT);
-      await refresh();
-    } catch (err) {
-      setView({ kind: "error", message: errorMessage(err) });
-    } finally {
-      setSaving(false);
-    }
+    await withBusy(async () => {
+      try {
+        await upsertGuest(auth, { ...draft, name, invitationSent: false });
+        setDraft(EMPTY_DRAFT);
+        await refresh();
+      } catch (err) {
+        setView({ kind: "error", message: errorMessage(err) });
+      } finally {
+        setSaving(false);
+      }
+    });
   }
 
   function copyGuestLink(id: string) {
@@ -151,10 +186,11 @@ export function AdminPage() {
     );
   }
 
-  const { guests, latestByGuest } = view;
+  const { guests, latestByGuest, songRecommendations } = view;
   return (
     <main className="max-w-6xl mx-auto px-6 py-8 pb-24 font-sans">
-      <Topbar onRefresh={() => void refresh()} onSignOut={handleSignOut} />
+      {busy && <BusyOverlay />}
+      <Topbar onRefresh={() => void withBusy(() => refresh())} onSignOut={handleSignOut} />
       <Stats guests={guests} latestByGuest={latestByGuest} />
 
       <details className="bg-white border border-bone rounded-lg p-6 mb-8 shadow-sm group">
@@ -175,13 +211,26 @@ export function AdminPage() {
                 required
               />
             </DraftField>
-            <DraftField label="Acompañantes">
+            <DraftField label="Cupos adultos">
+              <input
+                type="number"
+                min={1}
+                className="admin-input"
+                value={draft.adultSlots}
+                onChange={(e) =>
+                  setDraft({ ...draft, adultSlots: Math.max(1, Number(e.target.value)) })
+                }
+              />
+            </DraftField>
+            <DraftField label="Cupos niños">
               <input
                 type="number"
                 min={0}
                 className="admin-input"
-                value={draft.plusOnes}
-                onChange={(e) => setDraft({ ...draft, plusOnes: Number(e.target.value) })}
+                value={draft.kidSlots}
+                onChange={(e) =>
+                  setDraft({ ...draft, kidSlots: Math.max(0, Number(e.target.value)) })
+                }
               />
             </DraftField>
             <DraftField label="Contacto">
@@ -233,6 +282,11 @@ export function AdminPage() {
         onToggleInvitation={toggleInvitationSent}
         onCopyLink={copyGuestLink}
         onDelete={handleDelete}
+      />
+
+      <SongRecommendationsSection
+        recommendations={songRecommendations}
+        guests={guests}
       />
     </main>
   );
@@ -308,21 +362,46 @@ function Stats({ guests, latestByGuest }: { guests: Guest[]; latestByGuest: Map<
     const declined = guests.filter((g) => latestByGuest.get(g.id)?.response === "decline");
     const pending = total - accepted.length - declined.length;
     const invitationsSent = guests.filter((g) => g.invitationSent).length;
-    const confirmedPeople = accepted.reduce(
-      (acc, g) => acc + (latestByGuest.get(g.id)?.partySize ?? 0),
-      0,
-    );
-    return { total, accepted, declined, pending, invitationsSent, confirmedPeople };
+    let adultsConfirmed = 0;
+    let kidsConfirmed = 0;
+    for (const g of accepted) {
+      const r = latestByGuest.get(g.id);
+      adultsConfirmed += r?.adultsConfirmed ?? 0;
+      kidsConfirmed += r?.kidsConfirmed ?? 0;
+    }
+    const adultSlotsTotal = guests.reduce((acc, g) => acc + g.adultSlots, 0);
+    const kidSlotsTotal = guests.reduce((acc, g) => acc + g.kidSlots, 0);
+    return {
+      total,
+      accepted,
+      declined,
+      pending,
+      invitationsSent,
+      adultsConfirmed,
+      kidsConfirmed,
+      adultSlotsTotal,
+      kidSlotsTotal,
+    };
   }, [guests, latestByGuest]);
 
   return (
     <section className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 mb-10">
-      <StatCard label="Invitados" value={stats.total} />
-      <StatCard label="Invitaciones enviadas" value={stats.invitationsSent} total={stats.total} />
+      <StatCard label="Invitaciones" value={stats.total} />
+      <StatCard label="Enviadas" value={stats.invitationsSent} total={stats.total} />
       <StatCard label="Aceptaron" value={stats.accepted.length} />
       <StatCard label="No pueden" value={stats.declined.length} />
-      <StatCard label="Sin responder" value={stats.pending} />
-      <StatCard label="Personas confirmadas" value={stats.confirmedPeople} accent />
+      <StatCard
+        label="Adultos"
+        value={stats.adultsConfirmed}
+        total={stats.adultSlotsTotal}
+        accent
+      />
+      <StatCard
+        label="Niños"
+        value={stats.kidsConfirmed}
+        total={stats.kidSlotsTotal}
+        accent
+      />
     </section>
   );
 }
@@ -406,10 +485,10 @@ function GuestTable({
         <thead>
           <tr className="bg-cream">
             <Th>Invitado</Th>
-            <Th>Acomp.</Th>
+            <Th>Cupos</Th>
             <Th>Invitación</Th>
             <Th>Respuesta</Th>
-            <Th>Confirm.</Th>
+            <Th>Confirmados</Th>
             <Th>Comentario</Th>
             <Th aria-label="Acciones"></Th>
           </tr>
@@ -432,7 +511,9 @@ function GuestTable({
                   <div className="font-medium text-ink">{guest.name}</div>
                   <div className="text-[0.78rem] text-subtle font-mono">{guest.id}</div>
                 </Td>
-                <Td>{guest.plusOnes}</Td>
+                <Td>
+                  <SlotsCell adults={guest.adultSlots} kids={guest.kidSlots} />
+                </Td>
                 <Td>
                   <label className="inline-flex items-center gap-2 cursor-pointer">
                     <input
@@ -447,7 +528,13 @@ function GuestTable({
                 <Td>
                   <ResponsePill response={rsvp?.response} />
                 </Td>
-                <Td>{rsvp?.partySize ?? "—"}</Td>
+                <Td>
+                  {rsvp?.response === "accept" ? (
+                    <SlotsCell adults={rsvp.adultsConfirmed} kids={rsvp.kidsConfirmed} />
+                  ) : (
+                    "—"
+                  )}
+                </Td>
                 <Td>{rsvp?.comment ?? ""}</Td>
                 <Td>
                   <div className="flex gap-2 justify-end">
@@ -483,6 +570,112 @@ function Th({ children, ...rest }: React.ThHTMLAttributes<HTMLTableCellElement>)
 }
 function Td({ children }: { children: React.ReactNode }) {
   return <td className="px-4 py-3 align-middle">{children}</td>;
+}
+
+function SongRecommendationsSection({
+  recommendations,
+  guests,
+}: {
+  recommendations: SongRecommendation[];
+  guests: Guest[];
+}) {
+  const guestNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const g of guests) map.set(g.id, g.name);
+    return map;
+  }, [guests]);
+
+  const sorted = useMemo(() => {
+    return [...recommendations].sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
+  }, [recommendations]);
+
+  return (
+    <section className="mt-12">
+      <header className="flex items-baseline justify-between mb-4">
+        <h2 className="font-display italic text-2xl m-0">Canciones recomendadas</h2>
+        <span className="text-sm text-muted tabular-nums">{sorted.length}</span>
+      </header>
+      <div className="bg-white border border-bone rounded-lg overflow-hidden shadow-sm overflow-x-auto">
+        <table className="w-full border-collapse text-sm">
+          <thead>
+            <tr className="bg-cream">
+              <Th>Invitado</Th>
+              <Th>Canción</Th>
+              <Th>Artistas</Th>
+              <Th aria-label="Link"></Th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.length === 0 && (
+              <tr>
+                <td colSpan={4} className="text-center text-subtle italic py-10 px-4">
+                  Todavía no hay recomendaciones.
+                </td>
+              </tr>
+            )}
+            {sorted.map((rec, idx) => (
+              <tr
+                key={`${rec.timestamp}-${rec.trackId}-${idx}`}
+                className="border-t border-bone hover:bg-soft/30 transition-colors"
+              >
+                <Td>{guestNameById.get(rec.guestId) ?? rec.guestId}</Td>
+                <Td>
+                  <span className="font-medium text-ink">{rec.trackName}</span>
+                </Td>
+                <Td>{rec.artists}</Td>
+                <Td>
+                  {rec.spotifyUrl && (
+                    <a
+                      className="icon-btn inline-block"
+                      href={rec.spotifyUrl}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                    >
+                      Spotify ↗
+                    </a>
+                  )}
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function BusyOverlay() {
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-ivory/55 backdrop-blur-[1px] flex items-center justify-center"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="bg-white border border-bone rounded-xl shadow-lg px-6 py-5 flex items-center gap-4">
+        <Spinner />
+        <span className="text-sm font-medium text-ink">Guardando…</span>
+      </div>
+    </div>
+  );
+}
+
+function Spinner() {
+  return (
+    <span
+      className="block w-5 h-5 border-2 border-bone border-t-ink rounded-full animate-spin"
+      aria-hidden="true"
+    />
+  );
+}
+
+function SlotsCell({ adults, kids }: { adults: number; kids: number }) {
+  return (
+    <div className="flex gap-2 items-baseline tabular-nums text-ink">
+      <span className="font-medium">{adults}A</span>
+      {kids > 0 && <span className="text-muted">·</span>}
+      {kids > 0 && <span className="font-medium">{kids}N</span>}
+    </div>
+  );
 }
 
 function ResponsePill({ response }: { response: Rsvp["response"] | undefined }) {

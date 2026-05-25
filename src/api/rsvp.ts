@@ -5,7 +5,8 @@ export type RsvpResponse = "accept" | "decline";
 export type RsvpPayload = {
   id: string;
   response: RsvpResponse;
-  partySize: number;
+  adultsConfirmed: number;
+  kidsConfirmed: number;
   comment?: string;
 };
 

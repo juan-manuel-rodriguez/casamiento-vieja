@@ -44,9 +44,17 @@ export const APPS_SCRIPT_URL = "https://script.google.com/macros/s/.../exec";
 export const EVENT = {
   couple: "Juana & Manuel",
   date: "15 de marzo de 2026",
+  spotifyTrackUrl: "https://open.spotify.com/track/...", // opcional: música de fondo
   // …
 };
 ```
+
+### 3. Spotify (búsqueda de canciones)
+
+1. [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) → **Create app**.
+2. Nombre cualquiera. **Redirect URI**: `http://127.0.0.1:5173/callback` (no se usa, pero Spotify lo pide). **API**: marcá Web API. **Save**.
+3. En la página del app: copiá **Client ID** y, atrás del botón "View client secret", el **Client Secret**.
+4. En el editor de Apps Script → ⚙ **Project Settings → Script Properties**, agregá dos rows: `SPOTIFY_CLIENT_ID` y `SPOTIFY_CLIENT_SECRET` con los valores que copiaste. Sobreviven a redeploys.
 
 ## Desarrollo
 

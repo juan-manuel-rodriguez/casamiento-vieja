@@ -39,4 +39,6 @@ export const EVENT = {
   mapUrl: "https://maps.app.goo.gl/SFZL2KjHdDynPJYC6",
   photoUrl: "",
   rsvpDeadline: "20 de septiembre",
+  /** Spotify track URL para el reproductor que se muestra en la página del invitado. */
+  spotifyTrackUrl: "https://open.spotify.com/track/2VxeLyX666F8uXCJ0dZF8B",
 } as const;

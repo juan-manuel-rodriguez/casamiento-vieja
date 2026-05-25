@@ -4,7 +4,8 @@ export type Guest = {
   rowIndex: number;
   id: string;
   name: string;
-  plusOnes: number;
+  adultSlots: number;
+  kidSlots: number;
   invitationSent: boolean;
   contact: string;
   notes: string;
@@ -14,12 +15,13 @@ export type Rsvp = {
   timestamp: string;
   guestId: string;
   response: "accept" | "decline" | string;
-  partySize: number;
+  adultsConfirmed: number;
+  kidsConfirmed: number;
   comment: string;
 };
 
 /** Minimal projection of a guest exposed to the public guest page. */
-export type PublicGuest = Pick<Guest, "id" | "name" | "plusOnes">;
+export type PublicGuest = Pick<Guest, "id" | "name" | "adultSlots" | "kidSlots">;
 
 export async function fetchPublicGuest(id: string): Promise<PublicGuest | null> {
   const response = await getJson<{ found: boolean; guest?: PublicGuest }>({
@@ -55,14 +57,14 @@ export function latestRsvpByGuestId(rsvps: Rsvp[]): Map<string, Rsvp> {
 }
 
 /**
- * Input for upsertGuest. `id` is optional: when omitted the server slugifies
- * `name` and resolves collisions with a numeric suffix. Provide `id` only when
- * updating an existing row.
+ * Input for upsertGuest. `id` is optional: when omitted the server generates
+ * a random UUID. Provide `id` only when updating an existing row.
  */
 export type GuestInput = {
   id?: string;
   name: string;
-  plusOnes: number;
+  adultSlots: number;
+  kidSlots: number;
   invitationSent: boolean;
   contact: string;
   notes: string;

@@ -5,13 +5,21 @@
  * SETUP (once):
  *   1. Open the Sheet → Extensions → Apps Script.
  *   2. Delete the example file and paste this file as Code.gs.
- *   3. Change ADMIN_PASSPHRASE below to a string only you know.
+ *   3. In the editor sidebar: ⚙ Project Settings → Script properties.
+ *      Add three rows:
+ *        - ADMIN_PASSPHRASE (passphrase the /admin page will require)
+ *        - SPOTIFY_CLIENT_ID
+ *        - SPOTIFY_CLIENT_SECRET (both from developer.spotify.com)
+ *      These survive code rewrites.
  *   4. Save. Run the `setup` function once (it asks for permissions).
- *      This creates the `guests` and `rsvps` tabs with the correct headers.
+ *      This creates the `guests`, `rsvps` and `songRecommendations` tabs.
  *   5. Deploy → New deployment → Web app.
  *        - Execute as: Me
  *        - Who has access: Anyone
  *      Copy the URL (ends in /exec) into src/config.ts as APPS_SCRIPT_URL.
+ *
+ *   When you redeploy after editing this file, the Script Properties survive
+ *   so you don't need to re-enter the passphrase or Spotify keys.
  *
  * When you edit this file, redeploy via Manage deployments → Edit → New version
  * so the public URL serves the new code.
@@ -25,19 +33,28 @@
 
 /** @const {string} */ var GUESTS_TAB = 'guests';
 /** @const {string} */ var RSVPS_TAB = 'rsvps';
+/** @const {string} */ var SONG_RECS_TAB = 'songRecommendations';
 
 /** @const {Array<string>} */
-var GUESTS_HEADERS = ['id', 'name', 'plusOnes', 'invitationSent', 'contact', 'notes'];
+var GUESTS_HEADERS = ['id', 'name', 'adultSlots', 'kidSlots', 'invitationSent', 'contact', 'notes'];
 
 /** @const {Array<string>} */
-var RSVPS_HEADERS = ['timestamp', 'guestId', 'response', 'partySize', 'comment'];
+var RSVPS_HEADERS = ['timestamp', 'guestId', 'response', 'adultsConfirmed', 'kidsConfirmed', 'comment'];
+
+/** @const {Array<string>} */
+var SONG_RECS_HEADERS = ['timestamp', 'guestId', 'trackId', 'trackName', 'artists', 'spotifyUrl'];
 
 /**
- * Shared secret required to call any admin endpoint. Change this to a value
- * only you know before deploying. Anyone you tell can manage the guest list.
+ * Key used to store the admin passphrase in PropertiesService. Set the value
+ * via Project Settings → Script Properties. Storing it outside of source
+ * means pasting a new version of this file does not overwrite the passphrase.
  * @const {string}
  */
-var ADMIN_PASSPHRASE = 'cambiame';
+var ADMIN_PASSPHRASE_KEY = 'ADMIN_PASSPHRASE';
+
+/** @const {string} */ var SPOTIFY_CLIENT_ID_KEY = 'SPOTIFY_CLIENT_ID';
+/** @const {string} */ var SPOTIFY_CLIENT_SECRET_KEY = 'SPOTIFY_CLIENT_SECRET';
+/** @const {string} */ var SPOTIFY_TOKEN_CACHE_KEY = 'SPOTIFY_TOKEN';
 
 /** @const {string} */ var RESPONSE_ACCEPT = 'accept';
 /** @const {string} */ var RESPONSE_DECLINE = 'decline';
@@ -49,8 +66,65 @@ var ADMIN_PASSPHRASE = 'cambiame';
  * if they are missing. Safe to call repeatedly.
  */
 function setup() {
+  migrateGuestsFromPlusOnes_();
+  migrateRsvpsFromPartySize_();
   ensureSheetWithHeaders_(GUESTS_TAB, GUESTS_HEADERS);
   ensureSheetWithHeaders_(RSVPS_TAB, RSVPS_HEADERS);
+  ensureSheetWithHeaders_(SONG_RECS_TAB, SONG_RECS_HEADERS);
+}
+
+/**
+ * Migration from the old guest schema:
+ *   [id, name, plusOnes, invitationSent, contact, notes]
+ * to the new one:
+ *   [id, name, adultSlots, kidSlots, invitationSent, contact, notes]
+ * Converts plusOnes (extras beyond the named invitee) into adultSlots (total
+ * adults, including the invitee) and seeds kidSlots = 0. Idempotent: if the
+ * sheet is missing, empty, or already on the new schema, this is a no-op.
+ */
+function migrateGuestsFromPlusOnes_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(GUESTS_TAB);
+  if (!sheet || sheet.getLastColumn() < 3) return;
+  var headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  if (headerRow[2] !== 'plusOnes') return;
+  var lastRow = sheet.getLastRow();
+  var data = lastRow >= 2 ? sheet.getRange(2, 1, lastRow - 1, 6).getValues() : [];
+  var migrated = data.map(function (r) {
+    return [r[0], r[1], (Number(r[2]) || 0) + 1, 0, r[3], r[4], r[5]];
+  });
+  sheet.clear();
+  sheet.getRange(1, 1, 1, GUESTS_HEADERS.length).setValues([GUESTS_HEADERS]);
+  if (migrated.length > 0) {
+    sheet.getRange(2, 1, migrated.length, GUESTS_HEADERS.length).setValues(migrated);
+  }
+  sheet.setFrozenRows(1);
+}
+
+/**
+ * Migration from the old rsvp schema:
+ *   [timestamp, guestId, response, partySize, comment]
+ * to the new one:
+ *   [timestamp, guestId, response, adultsConfirmed, kidsConfirmed, comment]
+ * Historical rsvps had no kid breakdown, so kidsConfirmed = 0. Idempotent.
+ */
+function migrateRsvpsFromPartySize_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(RSVPS_TAB);
+  if (!sheet || sheet.getLastColumn() < 4) return;
+  var headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  if (headerRow[3] !== 'partySize') return;
+  var lastRow = sheet.getLastRow();
+  var data = lastRow >= 2 ? sheet.getRange(2, 1, lastRow - 1, 5).getValues() : [];
+  var migrated = data.map(function (r) {
+    return [r[0], r[1], r[2], Number(r[3]) || 0, 0, r[4]];
+  });
+  sheet.clear();
+  sheet.getRange(1, 1, 1, RSVPS_HEADERS.length).setValues([RSVPS_HEADERS]);
+  if (migrated.length > 0) {
+    sheet.getRange(2, 1, migrated.length, RSVPS_HEADERS.length).setValues(migrated);
+  }
+  sheet.setFrozenRows(1);
 }
 
 // ---------- Router ----------
@@ -103,6 +177,12 @@ var HANDLERS_ = {
   submitRsvp: function (params) {
     return handleSubmitRsvp_(params);
   },
+  searchSongs: function (params) {
+    return handleSearchSongs_(params);
+  },
+  submitSongRecommendation: function (params) {
+    return handleSubmitSongRecommendation_(params);
+  },
   checkAuth: function (params) {
     requireAdmin_(params);
     return { ok: true };
@@ -114,6 +194,10 @@ var HANDLERS_ = {
   listRsvps: function (params) {
     requireAdmin_(params);
     return { rsvps: readRsvps_() };
+  },
+  listSongRecommendations: function (params) {
+    requireAdmin_(params);
+    return { recommendations: readSongRecommendations_() };
   },
   upsertGuest: function (params) {
     requireAdmin_(params);
@@ -189,12 +273,65 @@ function requireInt_(params, key, min, max) {
 // ---------- Auth ----------
 
 /**
- * Verify the caller knows ADMIN_PASSPHRASE. Throws on failure.
+ * Verify the caller knows the admin passphrase. Throws on failure.
  * @param {Object} params
  */
 function requireAdmin_(params) {
   var supplied = String(params.auth || '');
-  if (supplied !== ADMIN_PASSPHRASE) throw new Error('invalid passphrase');
+  var expected = getAdminPassphrase_();
+  if (!supplied || supplied !== expected) throw new Error('invalid passphrase');
+}
+
+/**
+ * Read the admin passphrase from PropertiesService. Throws if not set.
+ * @returns {string}
+ */
+function getAdminPassphrase_() {
+  var stored = PropertiesService.getScriptProperties().getProperty(ADMIN_PASSPHRASE_KEY);
+  if (!stored) {
+    throw new Error(
+      'Admin passphrase not configured. Set it in Project Settings → Script Properties (key: ' +
+      ADMIN_PASSPHRASE_KEY +
+      ').',
+    );
+  }
+  return stored;
+}
+
+/**
+ * Returns a cached Spotify access token, refreshing via the client_credentials
+ * flow when missing or expired. Token cache TTL = expires_in - 60 seconds so
+ * we never serve a token within 60s of expiry. Throws when the script
+ * properties are unset or Spotify rejects the credentials.
+ * @returns {string}
+ */
+function getSpotifyToken_() {
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get(SPOTIFY_TOKEN_CACHE_KEY);
+  if (cached) return cached;
+
+  var props = PropertiesService.getScriptProperties();
+  var clientId = props.getProperty(SPOTIFY_CLIENT_ID_KEY);
+  var clientSecret = props.getProperty(SPOTIFY_CLIENT_SECRET_KEY);
+  if (!clientId || !clientSecret) {
+    throw new Error(
+      'Spotify credentials not configured. Set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET in Project Settings → Script Properties.',
+    );
+  }
+  var auth = Utilities.base64Encode(clientId + ':' + clientSecret);
+  var resp = UrlFetchApp.fetch('https://accounts.spotify.com/api/token', {
+    method: 'post',
+    headers: { Authorization: 'Basic ' + auth },
+    payload: { grant_type: 'client_credentials' },
+    muteHttpExceptions: true,
+  });
+  if (resp.getResponseCode() !== 200) {
+    throw new Error('spotify auth failed: ' + resp.getContentText());
+  }
+  var json = JSON.parse(resp.getContentText());
+  var ttl = Math.max(60, Number(json.expires_in || 3600) - 60);
+  cache.put(SPOTIFY_TOKEN_CACHE_KEY, json.access_token, ttl);
+  return json.access_token;
 }
 
 // ---------- Handlers ----------
@@ -211,7 +348,12 @@ function handleGetGuest_(params) {
   if (!guest) return { found: false };
   return {
     found: true,
-    guest: { id: guest.id, name: guest.name, plusOnes: guest.plusOnes },
+    guest: {
+      id: guest.id,
+      name: guest.name,
+      adultSlots: guest.adultSlots,
+      kidSlots: guest.kidSlots,
+    },
   };
 }
 
@@ -228,15 +370,80 @@ function handleSubmitRsvp_(params) {
   var guest = findGuestById_(id);
   if (!guest) throw new Error('guest not found');
 
-  var maxPartySize = guest.plusOnes + 1;
-  var partySize = 0;
+  var adultsConfirmed = 0;
+  var kidsConfirmed = 0;
   if (response === RESPONSE_ACCEPT) {
-    partySize = requireInt_(params, 'partySize', 1, maxPartySize);
+    adultsConfirmed = requireInt_(params, 'adultsConfirmed', 1, guest.adultSlots);
+    kidsConfirmed = requireInt_(params, 'kidsConfirmed', 0, guest.kidSlots);
   }
   var comment = params.comment == null ? '' : String(params.comment);
 
   return withWriteLock_(function () {
-    sheetByName_(RSVPS_TAB).appendRow([new Date(), id, response, partySize, comment]);
+    sheetByName_(RSVPS_TAB).appendRow([
+      new Date(), id, response, adultsConfirmed, kidsConfirmed, comment,
+    ]);
+    return { ok: true };
+  });
+}
+
+/**
+ * Public search against Spotify's catalog. Used by the guest page to let
+ * guests pick a song to recommend.
+ * @param {Object} params
+ * @returns {{tracks: Array}}
+ */
+function handleSearchSongs_(params) {
+  var query = String(params.query || '').trim();
+  if (query.length < 2) return { tracks: [] };
+  var token = getSpotifyToken_();
+  var url =
+    'https://api.spotify.com/v1/search?type=track&limit=8&market=UY&q=' +
+    encodeURIComponent(query);
+  var resp = UrlFetchApp.fetch(url, {
+    headers: { Authorization: 'Bearer ' + token },
+    muteHttpExceptions: true,
+  });
+  if (resp.getResponseCode() !== 200) {
+    throw new Error('spotify search failed: ' + resp.getContentText());
+  }
+  var data = JSON.parse(resp.getContentText());
+  var items = (data.tracks && data.tracks.items) || [];
+  return {
+    tracks: items.map(function (t) {
+      var images = (t.album && t.album.images) || [];
+      var image = images.length > 0 ? images[images.length - 1] : null;
+      return {
+        id: t.id,
+        name: t.name,
+        artists: (t.artists || []).map(function (a) { return a.name; }).join(', '),
+        album: t.album ? t.album.name : '',
+        imageUrl: image ? image.url : '',
+        spotifyUrl: t.external_urls ? t.external_urls.spotify : '',
+        previewUrl: t.preview_url || '',
+      };
+    }),
+  };
+}
+
+/**
+ * Append a song recommendation row for the given guest.
+ * @param {Object} params
+ * @returns {{ok: true}}
+ */
+function handleSubmitSongRecommendation_(params) {
+  var guestId = requireString_(params, 'id');
+  var trackId = requireString_(params, 'trackId');
+  var trackName = requireString_(params, 'trackName');
+  var artists = String(params.artists || '');
+  var spotifyUrl = String(params.spotifyUrl || '');
+
+  var guest = findGuestById_(guestId);
+  if (!guest) throw new Error('guest not found');
+
+  return withWriteLock_(function () {
+    sheetByName_(SONG_RECS_TAB).appendRow([
+      new Date(), guestId, trackId, trackName, artists, spotifyUrl,
+    ]);
     return { ok: true };
   });
 }
@@ -252,7 +459,8 @@ function handleUpsertGuest_(params) {
   var input = params.guest || {};
   var name = requireString_(input, 'name');
   var providedId = String(input.id || '').trim();
-  var plusOnes = Math.max(0, Math.round(Number(input.plusOnes) || 0));
+  var adultSlots = Math.max(1, Math.round(Number(input.adultSlots) || 1));
+  var kidSlots = Math.max(0, Math.round(Number(input.kidSlots) || 0));
   var invitationSent = Boolean(input.invitationSent);
   var contact = input.contact == null ? '' : String(input.contact);
   var notes = input.notes == null ? '' : String(input.notes);
@@ -262,7 +470,7 @@ function handleUpsertGuest_(params) {
     var list = readGuests_();
     var id = providedId || Utilities.getUuid();
     var existing = findInList_(list, id);
-    var row = [id, name, plusOnes, invitationSent, contact, notes];
+    var row = [id, name, adultSlots, kidSlots, invitationSent, contact, notes];
     if (existing) {
       sheet.getRange(existing.rowIndex, 1, 1, row.length).setValues([row]);
       return { ok: true, created: false, id: id };
@@ -328,12 +536,26 @@ function sheetByName_(name) {
 }
 
 /**
+ * Idempotent: makes sure a sheet named `name` exists with the given headers
+ * in row 1. Safe under concurrent execution — if two doPost handlers race
+ * and both try to insertSheet, the second falls back to the just-created
+ * sheet instead of crashing.
  * @param {string} name
  * @param {Array<string>} headers
  */
 function ensureSheetWithHeaders_(name, headers) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(name) || ss.insertSheet(name);
+  var sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    try {
+      sheet = ss.insertSheet(name);
+    } catch (err) {
+      // Concurrent request created it between our getSheetByName and
+      // insertSheet calls. Re-read and proceed.
+      sheet = ss.getSheetByName(name);
+      if (!sheet) throw err;
+    }
+  }
   var firstRow = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
   var matches = true;
   for (var i = 0; i < headers.length; i++) {
@@ -346,13 +568,15 @@ function ensureSheetWithHeaders_(name, headers) {
 }
 
 /**
- * @typedef {{rowIndex: number, id: string, name: string, plusOnes: number,
- *           invitationSent: boolean, contact: string, notes: string}} Guest
+ * @typedef {{rowIndex: number, id: string, name: string, adultSlots: number,
+ *           kidSlots: number, invitationSent: boolean, contact: string,
+ *           notes: string}} Guest
  */
 
 /**
  * @typedef {{timestamp: string, guestId: string, response: string,
- *           partySize: number, comment: string}} Rsvp
+ *           adultsConfirmed: number, kidsConfirmed: number,
+ *           comment: string}} Rsvp
  */
 
 /**
@@ -367,6 +591,34 @@ function readGuests_() {
  */
 function readRsvps_() {
   return readSheet_(RSVPS_TAB, mapRsvpRow_);
+}
+
+/**
+ * @typedef {{timestamp: string, guestId: string, trackId: string,
+ *           trackName: string, artists: string, spotifyUrl: string}} SongRec
+ */
+
+/**
+ * @returns {Array<SongRec>}
+ */
+function readSongRecommendations_() {
+  return readSheet_(SONG_RECS_TAB, mapSongRecRow_);
+}
+
+/**
+ * @param {Array<*>} row
+ * @returns {SongRec}
+ */
+function mapSongRecRow_(row) {
+  var ts = row[0];
+  return {
+    timestamp: ts instanceof Date ? ts.toISOString() : String(ts || ''),
+    guestId: String(row[1] || ''),
+    trackId: String(row[2] || ''),
+    trackName: String(row[3] || ''),
+    artists: String(row[4] || ''),
+    spotifyUrl: String(row[5] || ''),
+  };
 }
 
 /**
@@ -393,10 +645,11 @@ function mapGuestRow_(row, rowIndex) {
     rowIndex: rowIndex,
     id: String(row[0] || ''),
     name: String(row[1] || ''),
-    plusOnes: Number(row[2] || 0),
-    invitationSent: row[3] === true || row[3] === 'TRUE' || row[3] === 'true',
-    contact: String(row[4] || ''),
-    notes: String(row[5] || ''),
+    adultSlots: Math.max(1, Number(row[2] || 1)),
+    kidSlots: Math.max(0, Number(row[3] || 0)),
+    invitationSent: row[4] === true || row[4] === 'TRUE' || row[4] === 'true',
+    contact: String(row[5] || ''),
+    notes: String(row[6] || ''),
   };
 }
 
@@ -410,8 +663,9 @@ function mapRsvpRow_(row) {
     timestamp: ts instanceof Date ? ts.toISOString() : String(ts || ''),
     guestId: String(row[1] || ''),
     response: String(row[2] || ''),
-    partySize: Number(row[3] || 0),
-    comment: String(row[4] || ''),
+    adultsConfirmed: Number(row[3] || 0),
+    kidsConfirmed: Number(row[4] || 0),
+    comment: String(row[5] || ''),
   };
 }
 
