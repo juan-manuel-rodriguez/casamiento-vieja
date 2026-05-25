@@ -600,8 +600,8 @@ function DressCodeTile() {
         </span>
         <h3 className="font-display text-2xl m-0 text-ink">{EVENT.dressCode}</h3>
         {hasDetails && (
-          <span className="mt-2 inline-flex items-center gap-1.5 text-sm text-gold-dark">
-            Ver detalles
+          <span className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-gold-dark underline underline-offset-4 decoration-soft">
+            ¿Qué me pongo?
           </span>
         )}
       </button>

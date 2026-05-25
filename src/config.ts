@@ -16,7 +16,7 @@ export const EVENT = {
   time: "20:00 hs",
   venue: "Verne Restó & Eventos",
   address: "Rambla Costanera M29 S09, Ciudad de la Costa, Canelones",
-  dressCode: "Sport Casual",
+  dressCode: "Semi formal",
   dressCodeDescription:
     "Un estilo semi-formal: prolijo y cómodo, sin caer en lo de etiqueta.",
   dressCodeWomen: [
@@ -40,5 +40,5 @@ export const EVENT = {
   photoUrl: "",
   rsvpDeadline: "20 de septiembre",
   /** Spotify track URL para el reproductor que se muestra en la página del invitado. */
-  spotifyTrackUrl: "https://open.spotify.com/track/1mea3bSkSGXuIRvnydlB5b",
+  spotifyTrackUrl: "https://open.spotify.com/track/6lanRgr6wXibZr8KgzXxBl",
 } as const;

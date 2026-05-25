@@ -631,7 +631,7 @@ function SongRecommendationsSection({
                       target="_blank"
                       rel="noreferrer noopener"
                     >
-                      Spotify ↗
+                      Spotify
                     </a>
                   )}
                 </Td>
