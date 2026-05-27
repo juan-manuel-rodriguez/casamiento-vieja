@@ -123,13 +123,14 @@ export function GuestPage() {
           </StatusBlock>
         )}
         {/* The greeting renders only when guest data is loaded. The
-            SpotifyPlayer right below renders for every state except "sent"
-            — once the guest has answered, the Spotify embed shows a "Listen
-            on Spotify" upsell that breaks the page's tone, so we drop it.
-            Mounting it for the other states keeps the iframe and IFrame API
-            controller ready by the time the cover is dismissed. */}
+            SpotifyPlayer is only rendered while we have a real guest to
+            entertain (loading or ready): on "sent" the embed flips to a
+            "Listen on Spotify" upsell, and on "not-found" or "error" the
+            music feels out of place. Mounting it during "loading" keeps
+            the iframe and IFrame API controller ready by the time the
+            cover is dismissed. */}
         {view.kind === "ready" && <Greeting name={view.guest.name} />}
-        {trackId && view.kind !== "sent" && (
+        {trackId && (view.kind === "loading" || view.kind === "ready") && (
           <SpotifyPlayer trackId={trackId} playerRef={playerRef} />
         )}
         {view.kind === "ready" && (
