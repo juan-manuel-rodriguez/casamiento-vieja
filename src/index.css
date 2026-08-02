@@ -57,13 +57,18 @@
            hover:enabled:bg-cream hover:enabled:border-ink
            active:translate-y-px disabled:opacity-60 disabled:cursor-not-allowed;
   }
-  .icon-btn {
-    @apply bg-transparent border border-bone rounded px-3 py-2 text-muted
-           text-[0.78rem] uppercase tracking-[0.14em] cursor-pointer
-           transition-colors hover:bg-cream hover:text-ink;
+  .icon-action {
+    @apply inline-flex items-center justify-center shrink-0 w-9 h-9
+           bg-transparent border border-bone rounded text-muted
+           cursor-pointer transition-colors
+           hover:bg-cream hover:text-ink hover:border-sand
+           focus-visible:outline-none focus-visible:border-gold;
   }
-  .icon-btn--danger {
+  .icon-action--danger {
     @apply hover:bg-danger-soft hover:text-danger hover:border-danger-border;
+  }
+  .icon-action--brand {
+    @apply hover:bg-success-soft hover:text-success hover:border-success-border;
   }
   .admin-input {
     @apply px-4 py-3 border border-bone rounded bg-ivory text-base font-sans

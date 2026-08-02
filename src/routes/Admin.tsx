@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { FaSpotify, FaWhatsapp } from "react-icons/fa6";
+import { LuLink, LuTrash2 } from "react-icons/lu";
 import {
   checkAuth,
   listGuests,
@@ -253,15 +255,15 @@ export function AdminPage() {
                 }
               />
             </DraftField>
-            <DraftField label="Lado">
+            <DraftField label="Invita">
               <select
                 className="admin-input"
                 value={draft.side}
                 onChange={(e) => setDraft({ ...draft, side: e.target.value as "vale" | "juan" | "" })}
               >
                 <option value="">Sin asignar</option>
-                <option value="vale">De Vale</option>
-                <option value="juan">De Juan</option>
+                <option value="vale">Vale</option>
+                <option value="juan">Juan</option>
               </select>
             </DraftField>
             <DraftField label="Contacto">
@@ -310,8 +312,8 @@ export function AdminPage() {
           onChange={(e) => setSideFilter(e.target.value as "all" | "vale" | "juan" | "unassigned")}
         >
           <option value="all">Todos</option>
-          <option value="vale">De Vale</option>
-          <option value="juan">De Juan</option>
+          <option value="vale">Invita Vale</option>
+          <option value="juan">Invita Juan</option>
           <option value="unassigned">Sin asignar</option>
         </select>
       </div>
@@ -536,9 +538,9 @@ function GuestTable({
         <thead>
           <tr className="bg-cream">
             <Th>Invitado</Th>
-            <Th>Lado</Th>
+            <Th>Invita</Th>
             <Th>Cupos</Th>
-            <Th>Invitación</Th>
+            <Th>Enviada</Th>
             <Th>Respuesta</Th>
             <Th>Confirmados</Th>
             <Th>Comentario</Th>
@@ -567,15 +569,14 @@ function GuestTable({
                   <SlotsCell adults={guest.adultSlots} kids={guest.kidSlots} />
                 </Td>
                 <Td>
-                  <label className="inline-flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="admin-checkbox"
-                      checked={guest.invitationSent}
-                      onChange={() => onToggleInvitation(guest)}
-                    />
-                    {guest.invitationSent && <Pill variant="sent">Enviada</Pill>}
-                  </label>
+                  <input
+                    type="checkbox"
+                    className="admin-checkbox"
+                    checked={guest.invitationSent}
+                    onChange={() => onToggleInvitation(guest)}
+                    aria-label={`Invitación enviada a ${guest.name}`}
+                    title={guest.invitationSent ? "Invitación enviada" : "Invitación sin enviar"}
+                  />
                 </Td>
                 <Td>
                   <ResponsePill response={guest.response} />
@@ -589,18 +590,30 @@ function GuestTable({
                 </Td>
                 <Td>{guest.comment ?? ""}</Td>
                 <Td>
-                  <div className="flex gap-2 justify-end">
-                    <button className="icon-btn" onClick={() => onSendWhatsApp(guest)}>
-                      Enviar WhatsApp
-                    </button>
-                    <button className="icon-btn" onClick={() => onCopyLink(guest.id)}>
-                      Copiar link
+                  <div className="flex gap-1.5 justify-end">
+                    <button
+                      className="icon-action icon-action--brand"
+                      onClick={() => onSendWhatsApp(guest)}
+                      title="Enviar por WhatsApp"
+                      aria-label={`Enviar invitación por WhatsApp a ${guest.name}`}
+                    >
+                      <FaWhatsapp size={17} aria-hidden="true" />
                     </button>
                     <button
-                      className="icon-btn icon-btn--danger"
-                      onClick={() => onDelete(guest)}
+                      className="icon-action"
+                      onClick={() => onCopyLink(guest.id)}
+                      title="Copiar link"
+                      aria-label={`Copiar link de ${guest.name}`}
                     >
-                      Eliminar
+                      <LuLink size={16} aria-hidden="true" />
+                    </button>
+                    <button
+                      className="icon-action icon-action--danger"
+                      onClick={() => onDelete(guest)}
+                      title="Eliminar"
+                      aria-label={`Eliminar a ${guest.name}`}
+                    >
+                      <LuTrash2 size={16} aria-hidden="true" />
                     </button>
                   </div>
                 </Td>
@@ -615,7 +628,7 @@ function GuestTable({
 
 function guestSideLabel(side: Guest["side"]) {
   if (side === "vale") return "Vale";
-  if (side === "juan") return "De Juan";
+  if (side === "juan") return "Juan";
   return "Sin asignar";
 }
 
@@ -687,12 +700,14 @@ function SongRecommendationsSection({
                 <Td>
                   {rec.spotifyUrl && (
                     <a
-                      className="icon-btn inline-block"
+                      className="icon-action icon-action--brand"
                       href={rec.spotifyUrl}
                       target="_blank"
                       rel="noreferrer noopener"
+                      title="Abrir en Spotify"
+                      aria-label={`Abrir ${rec.trackName} en Spotify`}
                     >
-                      Spotify
+                      <FaSpotify size={17} aria-hidden="true" />
                     </a>
                   )}
                 </Td>
@@ -749,14 +764,13 @@ function Pill({
   variant,
   children,
 }: {
-  variant: "neutral" | "accept" | "decline" | "sent";
+  variant: "neutral" | "accept" | "decline";
   children: React.ReactNode;
 }) {
   const styles: Record<typeof variant, string> = {
     neutral: "bg-cream text-muted border-bone",
     accept: "bg-success-soft text-success border-success-border",
     decline: "bg-danger-soft text-danger border-danger-border",
-    sent: "bg-soft text-gold-dark border-sand",
   };
   return (
     <span
