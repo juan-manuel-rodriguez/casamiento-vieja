@@ -41,6 +41,8 @@ export const EVENT = {
   rsvpDeadline: "20 de septiembre",
   giftMessage:
     "El mejor regalo es que nos acompañen en este día, pero si igual nos quieren hacer un regalo, pueden hacerlo acá.",
+  /** Banco donde están ambas cuentas. Sin esto no se puede transferir. */
+  giftBank: "Itaú",
   giftAccountUyuLabel: "Cuenta en pesos",
   giftAccountUyuValue: "9316139",
   giftAccountUsdLabel: "Cuenta en dólares",

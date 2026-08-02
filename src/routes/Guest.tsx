@@ -298,7 +298,10 @@ function GiftAccountSection() {
       <Eyebrow>Regalo</Eyebrow>
       <div className="bg-white border border-bone rounded-2xl shadow-md p-8 sm:p-12 mt-6 text-center">
         <h2 className="font-display italic font-normal text-4xl sm:text-5xl mb-4">Lista de regalos</h2>
-        <p className="text-muted max-w-prose mx-auto mb-7">{EVENT.giftMessage}</p>
+        <p className="text-muted max-w-prose mx-auto mb-6">{EVENT.giftMessage}</p>
+        <p className="inline-flex items-center rounded-full border border-sand bg-soft/60 px-5 py-1.5 mb-5 text-[0.78rem] uppercase tracking-[0.2em] text-gold-dark font-medium">
+          Banco {EVENT.giftBank}
+        </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl mx-auto">
           <div className="flex flex-col items-center gap-2 rounded-xl border border-bone bg-cream/40 px-6 py-5">
             <span className="text-[0.78rem] uppercase tracking-[0.22em] text-subtle font-medium">
