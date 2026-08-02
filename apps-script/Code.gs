@@ -34,6 +34,14 @@
 /** @const {string} */ var GUESTS_TAB = 'guests';
 /** @const {string} */ var SONG_RECS_TAB = 'songRecommendations';
 
+/**
+ * Legacy tab. RSVPs used to be appended here as an append-only history; they
+ * now live as a snapshot inside `guests`. Kept as a constant only so the
+ * migration can drain it and setup can delete it.
+ * @const {string}
+ */
+var LEGACY_RSVPS_TAB = 'rsvps';
+
 /** @const {Array<string>} */
 var GUESTS_HEADERS = [
   'id',
@@ -69,6 +77,18 @@ var ADMIN_PASSPHRASE_KEY = 'ADMIN_PASSPHRASE';
 /** @const {string} */ var RESPONSE_ACCEPT = 'accept';
 /** @const {string} */ var RESPONSE_DECLINE = 'decline';
 
+/**
+ * Build stamp. Bump it whenever this file changes, then after redeploying run
+ *
+ *   curl -sL "<APPS_SCRIPT_URL>?action=version"
+ *
+ * to confirm the live URL really serves the new code. Two things make that
+ * worth checking: saving in the editor does not publish anything, and "New
+ * deployment" mints a second URL instead of updating the one the app calls.
+ * @const {string}
+ */
+var CODE_VERSION = '2026-08-02.1';
+
 // ---------- Public bootstrap ----------
 
 /**
@@ -79,7 +99,43 @@ function setup() {
   migrateGuestsFromPlusOnes_();
   ensureSheetWithHeaders_(GUESTS_TAB, GUESTS_HEADERS);
   migrateRsvpHistoryIntoGuests_();
+  dropLegacyRsvpsSheet_();
+  ensureTextColumns_();
   ensureSheetWithHeaders_(SONG_RECS_TAB, SONG_RECS_HEADERS);
+}
+
+/**
+ * Deletes the legacy `rsvps` tab. Runs right after
+ * migrateRsvpHistoryIntoGuests_ so anything still worth keeping has already
+ * been folded into `guests`. The app writes RSVPs only into `guests` now, so
+ * the tab can only reappear if an older deployment is still being served.
+ */
+function dropLegacyRsvpsSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(LEGACY_RSVPS_TAB);
+  if (sheet) ss.deleteSheet(sheet);
+}
+
+/**
+ * Columns holding free text (name, comment, contact, notes) are forced to the
+ * plain-text number format. Otherwise Sheets parses a value starting with "+"
+ * or "=" — a phone like "+598 99 123 456", or a comment like "+1 amigo" — as
+ * a formula and the cell renders "Error de análisis de fórmula" instead of
+ * the text. Cheap enough to call on every request: one getNumberFormat read
+ * short-circuits it once the format is already applied.
+ * @const {Array<number>} 1-based indexes into GUESTS_HEADERS.
+ */
+var TEXT_COLUMNS_ = [2, 9, 11, 12];
+
+function ensureTextColumns_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(GUESTS_TAB);
+  if (!sheet) return;
+  if (sheet.getRange(2, TEXT_COLUMNS_[0]).getNumberFormat() === '@') return;
+  var rowCount = sheet.getMaxRows() - 1;
+  if (rowCount < 1) return;
+  for (var i = 0; i < TEXT_COLUMNS_.length; i++) {
+    sheet.getRange(2, TEXT_COLUMNS_[i], rowCount, 1).setNumberFormat('@');
+  }
 }
 
 /**
@@ -134,7 +190,7 @@ function migrateGuestsFromPlusOnes_() {
 function migrateRsvpHistoryIntoGuests_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var guestsSheet = ss.getSheetByName(GUESTS_TAB);
-  var rsvpsSheet = ss.getSheetByName('rsvps');
+  var rsvpsSheet = ss.getSheetByName(LEGACY_RSVPS_TAB);
   if (!guestsSheet || !rsvpsSheet || guestsSheet.getLastRow() < 2 || rsvpsSheet.getLastRow() < 2) return;
 
   var guestValues = guestsSheet.getRange(2, 1, guestsSheet.getLastRow() - 1, GUESTS_HEADERS.length).getValues();
@@ -225,6 +281,11 @@ function route_(method, e) {
  * requireAdmin_(params) themselves before doing any work.
  */
 var HANDLERS_ = {
+  version: function () {
+    return { version: CODE_VERSION, tabs: SpreadsheetApp.getActiveSpreadsheet().getSheets().map(function (s) {
+      return s.getName();
+    }) };
+  },
   getGuest: function (params) {
     return handleGetGuest_(params);
   },
