@@ -14,6 +14,7 @@ import {
   type SongRecommendation,
 } from "../api/songs";
 import { clearPassphrase, loadPassphrase, savePassphrase } from "../auth/passphrase";
+import { firstName } from "../lib/names";
 
 type ViewState =
   | { kind: "needs-passphrase"; error?: string }
@@ -176,7 +177,7 @@ export function AdminPage() {
     }
     const inviteLink = buildGuestLink(guest.id);
     const message = [
-      `Hola ${guest.name}!`,
+      `Hola ${firstName(guest.name)}!`,
       "Te compartimos tu invitación a nuestro casamiento:",
       inviteLink,
     ].join("\n");

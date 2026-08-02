@@ -8,6 +8,7 @@ import {
   type SpotifyTrack,
 } from "../api/songs";
 import { EVENT } from "../config";
+import { firstName } from "../lib/names";
 
 type ViewState =
   | { kind: "loading" }
@@ -243,12 +244,11 @@ function Hero({ photoStyle }: { photoStyle?: React.CSSProperties }) {
 }
 
 function Greeting({ name }: { name: string }) {
-  const firstName = name.trim().split(/\s+/)[0] ?? name;
   return (
     <Section>
       <Eyebrow>Bienvenida / Bienvenido</Eyebrow>
       <h2 className="font-display italic font-normal text-4xl sm:text-5xl mb-4">
-        Hola, <span className="text-gold-dark">{firstName}</span>
+        Hola, <span className="text-gold-dark">{firstName(name)}</span>
       </h2>
       <p className="text-muted max-w-prose mx-auto">
         Queremos compartir con vos uno de los días más importantes de nuestra vida. Esperamos que
