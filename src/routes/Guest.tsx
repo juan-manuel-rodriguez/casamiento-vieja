@@ -136,7 +136,6 @@ export function GuestPage() {
         {view.kind === "ready" && (
           <>
             <EventDetails />
-            <GiftAccountSection />
             <RsvpForm
               guest={view.guest}
               adultsConfirmed={adultsConfirmed}
@@ -150,6 +149,7 @@ export function GuestPage() {
               onRespond={respond}
             />
             <SongRecommendation guestId={view.guest.id} />
+            <GiftAccountSection />
           </>
         )}
         {view.kind === "sent" && (
@@ -265,7 +265,9 @@ function EventDetails() {
       <h2 className="font-display italic font-normal text-4xl sm:text-5xl mb-8">Detalles del evento</h2>
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 text-left">
         <DetailTile eyebrow="Cuándo" title={EVENT.date}>
-          {EVENT.time && <p className="text-sm text-muted m-0">A partir de las {EVENT.time}</p>}
+          {EVENT.time && (
+            <p className="text-sm text-muted m-0">A partir de las {EVENT.time}, por favor ser puntuales.</p>
+          )}
         </DetailTile>
         <DetailTile eyebrow="Dónde" title={EVENT.venue}>
           {EVENT.address && <p className="text-sm text-muted m-0">{EVENT.address}</p>}
