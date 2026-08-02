@@ -37,6 +37,37 @@ const EMPTY_DRAFT: NewGuestDraft = {
   notes: "",
 };
 
+type Filters = {
+  search: string;
+  side: "all" | "vale" | "juan" | "unassigned";
+  response: "all" | "pending" | "accept" | "decline";
+  sent: "all" | "sent" | "unsent";
+};
+
+const EMPTY_FILTERS: Filters = { search: "", side: "all", response: "all", sent: "all" };
+
+function applyFilters(guests: Guest[], filters: Filters): Guest[] {
+  const needle = filters.search.trim().toLowerCase();
+  return guests.filter((guest) => {
+    if (needle && !`${guest.name} ${guest.id}`.toLowerCase().includes(needle)) return false;
+
+    const side = guest.side || "";
+    if (filters.side === "unassigned" && side) return false;
+    if (filters.side !== "all" && filters.side !== "unassigned" && side !== filters.side) {
+      return false;
+    }
+
+    // An empty `response` is a guest who has not answered yet.
+    const response = guest.response || "pending";
+    if (filters.response !== "all" && response !== filters.response) return false;
+
+    if (filters.sent === "sent" && !guest.invitationSent) return false;
+    if (filters.sent === "unsent" && guest.invitationSent) return false;
+
+    return true;
+  });
+}
+
 export function AdminPage() {
   const [auth, setAuth] = useState<string | null>(() => loadPassphrase());
   const [view, setView] = useState<ViewState>(
@@ -44,8 +75,7 @@ export function AdminPage() {
   );
   const [draft, setDraft] = useState<NewGuestDraft>(EMPTY_DRAFT);
   const [saving, setSaving] = useState(false);
-  const [search, setSearch] = useState("");
-  const [sideFilter, setSideFilter] = useState<"all" | "vale" | "juan" | "unassigned">("all");
+  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [busy, setBusy] = useState(false);
 
   async function withBusy(fn: () => Promise<void>): Promise<void> {
@@ -210,6 +240,15 @@ export function AdminPage() {
   }
 
   const { guests, songRecommendations } = view;
+  // Plain calls, not useMemo: this runs after the early returns above, where
+  // hooks are off limits, and filtering a wedding-sized list is free.
+  const filtered = applyFilters(guests, filters);
+  const hasActiveFilters =
+    filters.search.trim() !== "" ||
+    filters.side !== "all" ||
+    filters.response !== "all" ||
+    filters.sent !== "all";
+
   return (
     <main className="max-w-6xl mx-auto px-6 py-8 pb-24 font-sans">
       {busy && <BusyOverlay />}
@@ -300,29 +339,66 @@ export function AdminPage() {
         </form>
       </details>
 
-      <div className="flex flex-wrap gap-3 items-center mb-4">
+      <div className="flex flex-wrap gap-3 items-center mb-3">
         <input
           className="flex-1 min-w-[200px] px-4 py-3 border border-bone rounded bg-white focus:outline-none focus:border-gold"
           placeholder="Buscar por nombre o id…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          value={filters.search}
+          onChange={(e) => setFilters({ ...filters, search: e.target.value })}
         />
-        <select
-          className="px-4 py-3 border border-bone rounded bg-white focus:outline-none focus:border-gold"
-          value={sideFilter}
-          onChange={(e) => setSideFilter(e.target.value as "all" | "vale" | "juan" | "unassigned")}
-        >
-          <option value="all">Todos</option>
-          <option value="vale">Invita Vale</option>
-          <option value="juan">Invita Juan</option>
-          <option value="unassigned">Sin asignar</option>
-        </select>
+        <FilterSelect
+          label="Invita"
+          value={filters.side}
+          onChange={(side) => setFilters({ ...filters, side })}
+          options={[
+            { value: "all", label: "Invita: todos" },
+            { value: "vale", label: "Invita Vale" },
+            { value: "juan", label: "Invita Juan" },
+            { value: "unassigned", label: "Sin asignar" },
+          ]}
+        />
+        <FilterSelect
+          label="Respuesta"
+          value={filters.response}
+          onChange={(response) => setFilters({ ...filters, response })}
+          options={[
+            { value: "all", label: "Respuesta: todas" },
+            { value: "pending", label: "Pendientes" },
+            { value: "accept", label: "Aceptaron" },
+            { value: "decline", label: "No pueden" },
+          ]}
+        />
+        <FilterSelect
+          label="Invitación"
+          value={filters.sent}
+          onChange={(sent) => setFilters({ ...filters, sent })}
+          options={[
+            { value: "all", label: "Invitación: todas" },
+            { value: "sent", label: "Enviadas" },
+            { value: "unsent", label: "Sin enviar" },
+          ]}
+        />
+      </div>
+
+      <div className="flex flex-wrap gap-3 items-center mb-4 text-sm text-muted">
+        <span className="tabular-nums">
+          {filtered.length === guests.length
+            ? `${guests.length} invitados`
+            : `${filtered.length} de ${guests.length} invitados`}
+        </span>
+        {hasActiveFilters && (
+          <button
+            className="underline underline-offset-4 hover:text-ink transition-colors cursor-pointer"
+            onClick={() => setFilters(EMPTY_FILTERS)}
+          >
+            Limpiar filtros
+          </button>
+        )}
       </div>
 
       <GuestTable
-        guests={guests}
-        search={search}
-        sideFilter={sideFilter}
+        guests={filtered}
+        totalGuests={guests.length}
         onToggleInvitation={toggleInvitationSent}
         onCopyLink={copyGuestLink}
         onSendWhatsApp={sendInvitationWhatsApp}
@@ -498,10 +574,43 @@ function DraftField({
   );
 }
 
+/**
+ * A labelled dropdown for the filter bar. The label is only exposed to screen
+ * readers — on screen the selected option already reads as "Invita: todos",
+ * so a visible label would just repeat it.
+ */
+function FilterSelect<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: Array<{ value: T; label: string }>;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <select
+      className="px-4 py-3 border border-bone rounded bg-white focus:outline-none focus:border-gold cursor-pointer"
+      aria-label={label}
+      value={value}
+      onChange={(e) => onChange(e.target.value as T)}
+    >
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 type TableProps = {
+  /** Already filtered by the caller. */
   guests: Guest[];
-  search: string;
-  sideFilter: "all" | "vale" | "juan" | "unassigned";
+  /** Unfiltered count, so the empty state can tell "no guests" from "no matches". */
+  totalGuests: number;
   onToggleInvitation: (guest: Guest) => void;
   onCopyLink: (id: string) => void;
   onSendWhatsApp: (guest: Guest) => void;
@@ -510,29 +619,12 @@ type TableProps = {
 
 function GuestTable({
   guests,
-  search,
-  sideFilter,
+  totalGuests,
   onToggleInvitation,
   onCopyLink,
   onSendWhatsApp,
   onDelete,
 }: TableProps) {
-  const filtered = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    return guests.filter((g) => {
-      const matchesSearch =
-        !needle || g.name.toLowerCase().includes(needle) || g.id.toLowerCase().includes(needle);
-      const side = g.side || "";
-      const matchesSide =
-        sideFilter === "all"
-          ? true
-          : sideFilter === "unassigned"
-            ? !side
-            : side === sideFilter;
-      return matchesSearch && matchesSide;
-    });
-  }, [guests, search, sideFilter]);
-
   return (
     <div className="bg-white border border-bone rounded-lg overflow-hidden shadow-sm overflow-x-auto">
       <table className="w-full border-collapse text-sm">
@@ -549,16 +641,16 @@ function GuestTable({
           </tr>
         </thead>
         <tbody>
-          {filtered.length === 0 && (
+          {guests.length === 0 && (
             <tr>
               <td colSpan={8} className="text-center text-subtle italic py-12 px-4">
-                {guests.length === 0
+                {totalGuests === 0
                   ? "Todavía no hay invitados. Agregá el primero arriba."
-                  : "No hay resultados para tu búsqueda."}
+                  : "Ningún invitado coincide con los filtros."}
               </td>
             </tr>
           )}
-          {filtered.map((guest) => {
+          {guests.map((guest) => {
             return (
               <tr key={guest.id} className="border-t border-bone hover:bg-soft/30 transition-colors">
                 <Td>
