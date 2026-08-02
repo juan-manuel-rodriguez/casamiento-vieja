@@ -136,6 +136,7 @@ export function GuestPage() {
         {view.kind === "ready" && (
           <>
             <EventDetails />
+            <GiftAccountSection />
             <RsvpForm
               guest={view.guest}
               adultsConfirmed={adultsConfirmed}
@@ -284,6 +285,36 @@ function EventDetails() {
         <DetailTile eyebrow="Confirmar antes del" title={EVENT.rsvpDeadline}>
           <p className="text-sm text-muted m-0">Para que podamos organizar todo a tiempo.</p>
         </DetailTile>
+      </div>
+    </Section>
+  );
+}
+
+function GiftAccountSection() {
+  return (
+    <Section>
+      <Eyebrow>Regalo</Eyebrow>
+      <div className="bg-white border border-bone rounded-2xl shadow-md p-8 sm:p-12 mt-6 text-center">
+        <h2 className="font-display italic font-normal text-4xl sm:text-5xl mb-4">Lista de regalos</h2>
+        <p className="text-muted max-w-prose mx-auto mb-7">{EVENT.giftMessage}</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl mx-auto">
+          <div className="flex flex-col items-center gap-2 rounded-xl border border-bone bg-cream/40 px-6 py-5">
+            <span className="text-[0.78rem] uppercase tracking-[0.22em] text-subtle font-medium">
+              {EVENT.giftAccountUyuLabel}
+            </span>
+            <span className="font-sans text-lg sm:text-xl tracking-[0.04em] text-ink">
+              {EVENT.giftAccountUyuValue}
+            </span>
+          </div>
+          <div className="flex flex-col items-center gap-2 rounded-xl border border-bone bg-cream/40 px-6 py-5">
+            <span className="text-[0.78rem] uppercase tracking-[0.22em] text-subtle font-medium">
+              {EVENT.giftAccountUsdLabel}
+            </span>
+            <span className="font-sans text-lg sm:text-xl tracking-[0.04em] text-ink">
+              {EVENT.giftAccountUsdValue}
+            </span>
+          </div>
+        </div>
       </div>
     </Section>
   );

@@ -39,6 +39,12 @@ export const EVENT = {
   mapUrl: "https://maps.app.goo.gl/SFZL2KjHdDynPJYC6",
   photoUrl: "",
   rsvpDeadline: "20 de septiembre",
+  giftMessage:
+    "El mejor regalo es que nos acompañen en este día, pero si igual nos quieren hacer un regalo, pueden hacerlo acá.",
+  giftAccountUyuLabel: "Cuenta en pesos",
+  giftAccountUyuValue: "9316139",
+  giftAccountUsdLabel: "Cuenta en dólares",
+  giftAccountUsdValue: "9316120",
   /** Spotify track URL para el reproductor que se muestra en la página del invitado. */
   spotifyTrackUrl: "https://open.spotify.com/track/6lanRgr6wXibZr8KgzXxBl",
 } as const;
