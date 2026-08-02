@@ -4,6 +4,7 @@ export type Guest = {
   rowIndex: number;
   id: string;
   name: string;
+  side: "vale" | "juan" | "";
   adultSlots: number;
   kidSlots: number;
   invitationSent: boolean;
@@ -43,6 +44,7 @@ export async function listGuests(auth: string): Promise<Guest[]> {
 export type GuestInput = {
   id?: string;
   name: string;
+  side: "vale" | "juan" | "";
   adultSlots: number;
   kidSlots: number;
   invitationSent: boolean;

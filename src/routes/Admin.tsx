@@ -29,6 +29,7 @@ const EMPTY_DRAFT: NewGuestDraft = {
   name: "",
   adultSlots: 1,
   kidSlots: 0,
+  side: "",
   contact: "",
   notes: "",
 };
@@ -41,6 +42,7 @@ export function AdminPage() {
   const [draft, setDraft] = useState<NewGuestDraft>(EMPTY_DRAFT);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
+  const [sideFilter, setSideFilter] = useState<"all" | "vale" | "juan" | "unassigned">("all");
   const [busy, setBusy] = useState(false);
 
   async function withBusy(fn: () => Promise<void>): Promise<void> {
@@ -251,6 +253,17 @@ export function AdminPage() {
                 }
               />
             </DraftField>
+            <DraftField label="Lado">
+              <select
+                className="admin-input"
+                value={draft.side}
+                onChange={(e) => setDraft({ ...draft, side: e.target.value as "vale" | "juan" | "" })}
+              >
+                <option value="">Sin asignar</option>
+                <option value="vale">De Vale</option>
+                <option value="juan">De Juan</option>
+              </select>
+            </DraftField>
             <DraftField label="Contacto">
               <input
                 className="admin-input"
@@ -291,11 +304,22 @@ export function AdminPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+        <select
+          className="px-4 py-3 border border-bone rounded bg-white focus:outline-none focus:border-gold"
+          value={sideFilter}
+          onChange={(e) => setSideFilter(e.target.value as "all" | "vale" | "juan" | "unassigned")}
+        >
+          <option value="all">Todos</option>
+          <option value="vale">De Vale</option>
+          <option value="juan">De Juan</option>
+          <option value="unassigned">Sin asignar</option>
+        </select>
       </div>
 
       <GuestTable
         guests={guests}
         search={search}
+        sideFilter={sideFilter}
         onToggleInvitation={toggleInvitationSent}
         onCopyLink={copyGuestLink}
         onSendWhatsApp={sendInvitationWhatsApp}
@@ -474,6 +498,7 @@ function DraftField({
 type TableProps = {
   guests: Guest[];
   search: string;
+  sideFilter: "all" | "vale" | "juan" | "unassigned";
   onToggleInvitation: (guest: Guest) => void;
   onCopyLink: (id: string) => void;
   onSendWhatsApp: (guest: Guest) => void;
@@ -483,6 +508,7 @@ type TableProps = {
 function GuestTable({
   guests,
   search,
+  sideFilter,
   onToggleInvitation,
   onCopyLink,
   onSendWhatsApp,
@@ -490,11 +516,19 @@ function GuestTable({
 }: TableProps) {
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    if (!needle) return guests;
-    return guests.filter(
-      (g) => g.name.toLowerCase().includes(needle) || g.id.toLowerCase().includes(needle),
-    );
-  }, [guests, search]);
+    return guests.filter((g) => {
+      const matchesSearch =
+        !needle || g.name.toLowerCase().includes(needle) || g.id.toLowerCase().includes(needle);
+      const side = g.side || "";
+      const matchesSide =
+        sideFilter === "all"
+          ? true
+          : sideFilter === "unassigned"
+            ? !side
+            : side === sideFilter;
+      return matchesSearch && matchesSide;
+    });
+  }, [guests, search, sideFilter]);
 
   return (
     <div className="bg-white border border-bone rounded-lg overflow-hidden shadow-sm overflow-x-auto">
@@ -502,6 +536,7 @@ function GuestTable({
         <thead>
           <tr className="bg-cream">
             <Th>Invitado</Th>
+            <Th>Lado</Th>
             <Th>Cupos</Th>
             <Th>Invitación</Th>
             <Th>Respuesta</Th>
@@ -513,7 +548,7 @@ function GuestTable({
         <tbody>
           {filtered.length === 0 && (
             <tr>
-              <td colSpan={7} className="text-center text-subtle italic py-12 px-4">
+              <td colSpan={8} className="text-center text-subtle italic py-12 px-4">
                 {guests.length === 0
                   ? "Todavía no hay invitados. Agregá el primero arriba."
                   : "No hay resultados para tu búsqueda."}
@@ -527,6 +562,7 @@ function GuestTable({
                   <div className="font-medium text-ink">{guest.name}</div>
                   <div className="text-[0.78rem] text-subtle font-mono">{guest.id}</div>
                 </Td>
+                <Td>{guestSideLabel(guest.side)}</Td>
                 <Td>
                   <SlotsCell adults={guest.adultSlots} kids={guest.kidSlots} />
                 </Td>
@@ -575,6 +611,12 @@ function GuestTable({
       </table>
     </div>
   );
+}
+
+function guestSideLabel(side: Guest["side"]) {
+  if (side === "vale") return "Vale";
+  if (side === "juan") return "De Juan";
+  return "Sin asignar";
 }
 
 function Th({ children, ...rest }: React.ThHTMLAttributes<HTMLTableCellElement>) {

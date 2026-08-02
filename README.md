@@ -82,7 +82,7 @@ Para ver la página del invitado sin Sheet ni nada cableado, agregá `?demo`:
 
 Pestaña `guests`:
 
-| id | name | adultSlots | kidSlots | invitationSent | response | adultsConfirmed | kidsConfirmed | comment | rsvpTimestamp | contact | notes |
+| id | name | adultSlots | kidSlots | invitationSent | response | adultsConfirmed | kidsConfirmed | comment | rsvpTimestamp | contact | notes | side |
 
 Pestaña `songRecommendations` (la escribe el Apps Script):
 

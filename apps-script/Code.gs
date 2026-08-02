@@ -48,6 +48,7 @@ var GUESTS_HEADERS = [
   'rsvpTimestamp',
   'contact',
   'notes',
+  'side',
 ];
 
 /** @const {Array<string>} */
@@ -85,7 +86,9 @@ function setup() {
  * Migration from the old guest schema:
  *   [id, name, plusOnes, invitationSent, contact, notes]
  * to the new one:
- *   [id, name, adultSlots, kidSlots, invitationSent, contact, notes]
+ *   [id, name, adultSlots, kidSlots, invitationSent, response,
+ *    adultsConfirmed, kidsConfirmed, comment, rsvpTimestamp,
+ *    contact, notes, side]
  * Converts plusOnes (extras beyond the named invitee) into adultSlots (total
  * adults, including the invitee) and seeds kidSlots = 0. Idempotent: if the
  * sheet is missing, empty, or already on the new schema, this is a no-op.
@@ -112,6 +115,7 @@ function migrateGuestsFromPlusOnes_() {
       '',
       r[4],
       r[5],
+      '',
     ];
   });
   sheet.clear();
@@ -439,6 +443,7 @@ function handleSubmitRsvp_(params) {
       new Date(),
       guest.contact,
       guest.notes,
+      guest.side,
     ];
     sheet.getRange(guest.rowIndex, 1, 1, row.length).setValues([row]);
     return { ok: true };
@@ -521,6 +526,8 @@ function handleUpsertGuest_(params) {
   var adultSlots = Math.max(1, Math.round(Number(input.adultSlots) || 1));
   var kidSlots = Math.max(0, Math.round(Number(input.kidSlots) || 0));
   var invitationSent = Boolean(input.invitationSent);
+  var side = String(input.side || '').trim().toLowerCase();
+  if (side !== 'vale' && side !== 'juan') side = '';
   var contact = input.contact == null ? '' : String(input.contact);
   var notes = input.notes == null ? '' : String(input.notes);
 
@@ -542,6 +549,7 @@ function handleUpsertGuest_(params) {
       existing ? existing.rsvpTimestamp : '',
       contact,
       notes,
+      side,
     ];
     if (existing) {
       sheet.getRange(existing.rowIndex, 1, 1, row.length).setValues([row]);
@@ -643,7 +651,8 @@ function ensureSheetWithHeaders_(name, headers) {
  * @typedef {{rowIndex: number, id: string, name: string, adultSlots: number,
  *           kidSlots: number, invitationSent: boolean, response: string,
  *           adultsConfirmed: number, kidsConfirmed: number, comment: string,
- *           rsvpTimestamp: string, contact: string, notes: string}} Guest
+ *           rsvpTimestamp: string, contact: string, notes: string,
+ *           side: string}} Guest
  */
 
 /**
@@ -715,6 +724,7 @@ function mapGuestRow_(row, rowIndex) {
     rsvpTimestamp: row[9] instanceof Date ? row[9].toISOString() : String(row[9] || ''),
     contact: String(row[10] || ''),
     notes: String(row[11] || ''),
+    side: String(row[12] || ''),
   };
 }
 
