@@ -21,10 +21,10 @@ estático (GitHub Pages, Netlify, Vercel).
 1. Abrí el Sheet → **Extensiones → Apps Script**.
 2. Borrá el archivo de ejemplo y pegá el contenido de
    [`apps-script/Code.gs`](apps-script/Code.gs).
-3. Cambiá la constante `ADMIN_PASSPHRASE` por una palabra que solo vos sepas.
+3. En ⚙ **Project Settings → Script Properties**, agregá `ADMIN_PASSPHRASE`.
 4. Guardá (💾). Elegí la función `setup` en el dropdown y dale **Run** (▶).
    Te va a pedir permisos la primera vez: aceptá. Eso crea las pestañas
-   `guests` y `rsvps` con los headers correctos.
+  `guests` y `songRecommendations` con los headers correctos.
 5. **Deploy → New deployment** → ⚙️ → **Web app**:
    - Execute as: **Me**
    - Who has access: **Anyone**
@@ -82,8 +82,8 @@ Para ver la página del invitado sin Sheet ni nada cableado, agregá `?demo`:
 
 Pestaña `guests`:
 
-| id | name | plusOnes (int) | invitationSent (bool) | contact | notes |
+| id | name | adultSlots | kidSlots | invitationSent | response | adultsConfirmed | kidsConfirmed | comment | rsvpTimestamp | contact | notes |
 
-Pestaña `rsvps` (la escribe el Apps Script):
+Pestaña `songRecommendations` (la escribe el Apps Script):
 
-| timestamp | guestId | response (`accept`/`decline`) | partySize | comment |
+| timestamp | guestId | trackId | trackName | artists | spotifyUrl |

@@ -12,7 +12,7 @@
  *        - SPOTIFY_CLIENT_SECRET (both from developer.spotify.com)
  *      These survive code rewrites.
  *   4. Save. Run the `setup` function once (it asks for permissions).
- *      This creates the `guests`, `rsvps` and `songRecommendations` tabs.
+ *      This creates the `guests` and `songRecommendations` tabs.
  *   5. Deploy → New deployment → Web app.
  *        - Execute as: Me
  *        - Who has access: Anyone
@@ -32,14 +32,23 @@
 // ---------- Configuration ----------
 
 /** @const {string} */ var GUESTS_TAB = 'guests';
-/** @const {string} */ var RSVPS_TAB = 'rsvps';
 /** @const {string} */ var SONG_RECS_TAB = 'songRecommendations';
 
 /** @const {Array<string>} */
-var GUESTS_HEADERS = ['id', 'name', 'adultSlots', 'kidSlots', 'invitationSent', 'contact', 'notes'];
-
-/** @const {Array<string>} */
-var RSVPS_HEADERS = ['timestamp', 'guestId', 'response', 'adultsConfirmed', 'kidsConfirmed', 'comment'];
+var GUESTS_HEADERS = [
+  'id',
+  'name',
+  'adultSlots',
+  'kidSlots',
+  'invitationSent',
+  'response',
+  'adultsConfirmed',
+  'kidsConfirmed',
+  'comment',
+  'rsvpTimestamp',
+  'contact',
+  'notes',
+];
 
 /** @const {Array<string>} */
 var SONG_RECS_HEADERS = ['timestamp', 'guestId', 'trackId', 'trackName', 'artists', 'spotifyUrl'];
@@ -62,14 +71,13 @@ var ADMIN_PASSPHRASE_KEY = 'ADMIN_PASSPHRASE';
 // ---------- Public bootstrap ----------
 
 /**
- * Idempotent setup. Creates the `guests` and `rsvps` tabs and writes headers
+ * Idempotent setup. Creates the `guests` tab and writes headers
  * if they are missing. Safe to call repeatedly.
  */
 function setup() {
   migrateGuestsFromPlusOnes_();
-  migrateRsvpsFromPartySize_();
   ensureSheetWithHeaders_(GUESTS_TAB, GUESTS_HEADERS);
-  ensureSheetWithHeaders_(RSVPS_TAB, RSVPS_HEADERS);
+  migrateRsvpHistoryIntoGuests_();
   ensureSheetWithHeaders_(SONG_RECS_TAB, SONG_RECS_HEADERS);
 }
 
@@ -91,7 +99,20 @@ function migrateGuestsFromPlusOnes_() {
   var lastRow = sheet.getLastRow();
   var data = lastRow >= 2 ? sheet.getRange(2, 1, lastRow - 1, 6).getValues() : [];
   var migrated = data.map(function (r) {
-    return [r[0], r[1], (Number(r[2]) || 0) + 1, 0, r[3], r[4], r[5]];
+    return [
+      r[0],
+      r[1],
+      (Number(r[2]) || 0) + 1,
+      0,
+      r[3],
+      '',
+      0,
+      0,
+      '',
+      '',
+      r[4],
+      r[5],
+    ];
   });
   sheet.clear();
   sheet.getRange(1, 1, 1, GUESTS_HEADERS.length).setValues([GUESTS_HEADERS]);
@@ -102,29 +123,58 @@ function migrateGuestsFromPlusOnes_() {
 }
 
 /**
- * Migration from the old rsvp schema:
- *   [timestamp, guestId, response, partySize, comment]
- * to the new one:
- *   [timestamp, guestId, response, adultsConfirmed, kidsConfirmed, comment]
- * Historical rsvps had no kid breakdown, so kidsConfirmed = 0. Idempotent.
+ * One-time migration that takes the latest RSVP per guest from the historical
+ * `rsvps` sheet and stores it as the current RSVP snapshot inside `guests`.
+ * Idempotent: if guests already have response data, this is a no-op.
  */
-function migrateRsvpsFromPartySize_() {
+function migrateRsvpHistoryIntoGuests_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(RSVPS_TAB);
-  if (!sheet || sheet.getLastColumn() < 4) return;
-  var headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  if (headerRow[3] !== 'partySize') return;
-  var lastRow = sheet.getLastRow();
-  var data = lastRow >= 2 ? sheet.getRange(2, 1, lastRow - 1, 5).getValues() : [];
-  var migrated = data.map(function (r) {
-    return [r[0], r[1], r[2], Number(r[3]) || 0, 0, r[4]];
-  });
-  sheet.clear();
-  sheet.getRange(1, 1, 1, RSVPS_HEADERS.length).setValues([RSVPS_HEADERS]);
-  if (migrated.length > 0) {
-    sheet.getRange(2, 1, migrated.length, RSVPS_HEADERS.length).setValues(migrated);
+  var guestsSheet = ss.getSheetByName(GUESTS_TAB);
+  var rsvpsSheet = ss.getSheetByName('rsvps');
+  if (!guestsSheet || !rsvpsSheet || guestsSheet.getLastRow() < 2 || rsvpsSheet.getLastRow() < 2) return;
+
+  var guestValues = guestsSheet.getRange(2, 1, guestsSheet.getLastRow() - 1, GUESTS_HEADERS.length).getValues();
+  var responseCol = 5;
+  var hasAnyResponse = false;
+  for (var i = 0; i < guestValues.length; i++) {
+    if (String(guestValues[i][responseCol] || '').trim()) {
+      hasAnyResponse = true;
+      break;
+    }
   }
-  sheet.setFrozenRows(1);
+  if (hasAnyResponse) return;
+
+  var rsvpRows = rsvpsSheet.getRange(2, 1, rsvpsSheet.getLastRow() - 1, rsvpsSheet.getLastColumn()).getValues();
+  var latestByGuest = {};
+  for (var r = 0; r < rsvpRows.length; r++) {
+    var row = rsvpRows[r];
+    var guestId = String(row[1] || '');
+    if (!guestId) continue;
+    var ts = row[0] instanceof Date ? row[0].getTime() : new Date(String(row[0] || '')).getTime();
+    var prev = latestByGuest[guestId];
+    if (!prev || ts > prev.ts) {
+      latestByGuest[guestId] = {
+        ts: ts,
+        rawTs: row[0],
+        response: String(row[2] || ''),
+        adultsConfirmed: Number(row[3] || 0),
+        kidsConfirmed: Number(row[4] || 0),
+        comment: String(row[5] || ''),
+      };
+    }
+  }
+
+  for (var g = 0; g < guestValues.length; g++) {
+    var guestId = String(guestValues[g][0] || '');
+    var latest = latestByGuest[guestId];
+    if (!latest) continue;
+    guestValues[g][5] = latest.response;
+    guestValues[g][6] = latest.adultsConfirmed;
+    guestValues[g][7] = latest.kidsConfirmed;
+    guestValues[g][8] = latest.comment;
+    guestValues[g][9] = latest.rawTs;
+  }
+  guestsSheet.getRange(2, 1, guestValues.length, GUESTS_HEADERS.length).setValues(guestValues);
 }
 
 // ---------- Router ----------
@@ -190,10 +240,6 @@ var HANDLERS_ = {
   listGuests: function (params) {
     requireAdmin_(params);
     return { guests: readGuests_() };
-  },
-  listRsvps: function (params) {
-    requireAdmin_(params);
-    return { rsvps: readRsvps_() };
   },
   listSongRecommendations: function (params) {
     requireAdmin_(params);
@@ -379,9 +425,22 @@ function handleSubmitRsvp_(params) {
   var comment = params.comment == null ? '' : String(params.comment);
 
   return withWriteLock_(function () {
-    sheetByName_(RSVPS_TAB).appendRow([
-      new Date(), id, response, adultsConfirmed, kidsConfirmed, comment,
-    ]);
+    var sheet = sheetByName_(GUESTS_TAB);
+    var row = [
+      guest.id,
+      guest.name,
+      guest.adultSlots,
+      guest.kidSlots,
+      guest.invitationSent,
+      response,
+      adultsConfirmed,
+      kidsConfirmed,
+      comment,
+      new Date(),
+      guest.contact,
+      guest.notes,
+    ];
+    sheet.getRange(guest.rowIndex, 1, 1, row.length).setValues([row]);
     return { ok: true };
   });
 }
@@ -470,7 +529,20 @@ function handleUpsertGuest_(params) {
     var list = readGuests_();
     var id = providedId || Utilities.getUuid();
     var existing = findInList_(list, id);
-    var row = [id, name, adultSlots, kidSlots, invitationSent, contact, notes];
+    var row = [
+      id,
+      name,
+      adultSlots,
+      kidSlots,
+      invitationSent,
+      existing ? existing.response : '',
+      existing ? existing.adultsConfirmed : 0,
+      existing ? existing.kidsConfirmed : 0,
+      existing ? existing.comment : '',
+      existing ? existing.rsvpTimestamp : '',
+      contact,
+      notes,
+    ];
     if (existing) {
       sheet.getRange(existing.rowIndex, 1, 1, row.length).setValues([row]);
       return { ok: true, created: false, id: id };
@@ -569,14 +641,9 @@ function ensureSheetWithHeaders_(name, headers) {
 
 /**
  * @typedef {{rowIndex: number, id: string, name: string, adultSlots: number,
- *           kidSlots: number, invitationSent: boolean, contact: string,
- *           notes: string}} Guest
- */
-
-/**
- * @typedef {{timestamp: string, guestId: string, response: string,
- *           adultsConfirmed: number, kidsConfirmed: number,
- *           comment: string}} Rsvp
+ *           kidSlots: number, invitationSent: boolean, response: string,
+ *           adultsConfirmed: number, kidsConfirmed: number, comment: string,
+ *           rsvpTimestamp: string, contact: string, notes: string}} Guest
  */
 
 /**
@@ -584,13 +651,6 @@ function ensureSheetWithHeaders_(name, headers) {
  */
 function readGuests_() {
   return readSheet_(GUESTS_TAB, mapGuestRow_);
-}
-
-/**
- * @returns {Array<Rsvp>}
- */
-function readRsvps_() {
-  return readSheet_(RSVPS_TAB, mapRsvpRow_);
 }
 
 /**
@@ -648,24 +708,13 @@ function mapGuestRow_(row, rowIndex) {
     adultSlots: Math.max(1, Number(row[2] || 1)),
     kidSlots: Math.max(0, Number(row[3] || 0)),
     invitationSent: row[4] === true || row[4] === 'TRUE' || row[4] === 'true',
-    contact: String(row[5] || ''),
-    notes: String(row[6] || ''),
-  };
-}
-
-/**
- * @param {Array<*>} row
- * @returns {Rsvp}
- */
-function mapRsvpRow_(row) {
-  var ts = row[0];
-  return {
-    timestamp: ts instanceof Date ? ts.toISOString() : String(ts || ''),
-    guestId: String(row[1] || ''),
-    response: String(row[2] || ''),
-    adultsConfirmed: Number(row[3] || 0),
-    kidsConfirmed: Number(row[4] || 0),
-    comment: String(row[5] || ''),
+    response: String(row[5] || ''),
+    adultsConfirmed: Math.max(0, Number(row[6] || 0)),
+    kidsConfirmed: Math.max(0, Number(row[7] || 0)),
+    comment: String(row[8] || ''),
+    rsvpTimestamp: row[9] instanceof Date ? row[9].toISOString() : String(row[9] || ''),
+    contact: String(row[10] || ''),
+    notes: String(row[11] || ''),
   };
 }
 

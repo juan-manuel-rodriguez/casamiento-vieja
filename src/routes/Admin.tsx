@@ -2,13 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import {
   checkAuth,
   listGuests,
-  listRsvps,
-  latestRsvpByGuestId,
   upsertGuest,
   deleteGuest,
   type Guest,
   type GuestInput,
-  type Rsvp,
 } from "../api/guests";
 import {
   listSongRecommendations,
@@ -22,7 +19,6 @@ type ViewState =
   | {
       kind: "ready";
       guests: Guest[];
-      latestByGuest: Map<string, Rsvp>;
       songRecommendations: SongRecommendation[];
     }
   | { kind: "error"; message: string };
@@ -68,15 +64,13 @@ export function AdminPage() {
     // covers the in-flight state.
     setView((current) => (current.kind === "ready" ? current : { kind: "loading" }));
     try {
-      const [guests, rsvps, songRecommendations] = await Promise.all([
+      const [guests, songRecommendations] = await Promise.all([
         listGuests(activeAuth),
-        listRsvps(activeAuth),
         listSongRecommendations(activeAuth),
       ]);
       setView({
         kind: "ready",
         guests,
-        latestByGuest: latestRsvpByGuestId(rsvps),
         songRecommendations,
       });
     } catch (err) {
@@ -158,8 +152,32 @@ export function AdminPage() {
   }
 
   function copyGuestLink(id: string) {
+    void navigator.clipboard.writeText(buildGuestLink(id));
+  }
+
+  function buildGuestLink(id: string): string {
     const base = window.location.origin + window.location.pathname.replace(/admin\/?$/, "");
-    void navigator.clipboard.writeText(`${base}?id=${id}`);
+    return `${base}?id=${id}`;
+  }
+
+  function normalizePhoneForWa(contact: string): string {
+    return contact.replace(/\D/g, "");
+  }
+
+  function sendInvitationWhatsApp(guest: Guest) {
+    const phone = normalizePhoneForWa(guest.contact ?? "");
+    if (!phone) {
+      alert("Este invitado no tiene un contacto válido para WhatsApp.");
+      return;
+    }
+    const inviteLink = buildGuestLink(guest.id);
+    const message = [
+      `Hola ${guest.name}!`,
+      "Te compartimos tu invitación a nuestro casamiento:",
+      inviteLink,
+    ].join("\n");
+    const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+    window.open(waUrl, "_blank", "noopener,noreferrer");
   }
 
   if (view.kind === "needs-passphrase") {
@@ -186,12 +204,12 @@ export function AdminPage() {
     );
   }
 
-  const { guests, latestByGuest, songRecommendations } = view;
+  const { guests, songRecommendations } = view;
   return (
     <main className="max-w-6xl mx-auto px-6 py-8 pb-24 font-sans">
       {busy && <BusyOverlay />}
       <Topbar onRefresh={() => void withBusy(() => refresh())} onSignOut={handleSignOut} />
-      <Stats guests={guests} latestByGuest={latestByGuest} />
+      <Stats guests={guests} />
 
       <details className="bg-white border border-bone rounded-lg p-6 mb-8 shadow-sm group">
         <summary className="cursor-pointer font-medium text-sm flex items-center gap-3 list-none [&::-webkit-details-marker]:hidden">
@@ -277,10 +295,10 @@ export function AdminPage() {
 
       <GuestTable
         guests={guests}
-        latestByGuest={latestByGuest}
         search={search}
         onToggleInvitation={toggleInvitationSent}
         onCopyLink={copyGuestLink}
+        onSendWhatsApp={sendInvitationWhatsApp}
         onDelete={handleDelete}
       />
 
@@ -355,19 +373,18 @@ function Topbar({ onRefresh, onSignOut }: { onRefresh: () => void; onSignOut: ()
   );
 }
 
-function Stats({ guests, latestByGuest }: { guests: Guest[]; latestByGuest: Map<string, Rsvp> }) {
+function Stats({ guests }: { guests: Guest[] }) {
   const stats = useMemo(() => {
     const total = guests.length;
-    const accepted = guests.filter((g) => latestByGuest.get(g.id)?.response === "accept");
-    const declined = guests.filter((g) => latestByGuest.get(g.id)?.response === "decline");
+    const accepted = guests.filter((g) => g.response === "accept");
+    const declined = guests.filter((g) => g.response === "decline");
     const pending = total - accepted.length - declined.length;
     const invitationsSent = guests.filter((g) => g.invitationSent).length;
     let adultsConfirmed = 0;
     let kidsConfirmed = 0;
     for (const g of accepted) {
-      const r = latestByGuest.get(g.id);
-      adultsConfirmed += r?.adultsConfirmed ?? 0;
-      kidsConfirmed += r?.kidsConfirmed ?? 0;
+      adultsConfirmed += g.adultsConfirmed;
+      kidsConfirmed += g.kidsConfirmed;
     }
     const adultSlotsTotal = guests.reduce((acc, g) => acc + g.adultSlots, 0);
     const kidSlotsTotal = guests.reduce((acc, g) => acc + g.kidSlots, 0);
@@ -382,7 +399,7 @@ function Stats({ guests, latestByGuest }: { guests: Guest[]; latestByGuest: Map<
       adultSlotsTotal,
       kidSlotsTotal,
     };
-  }, [guests, latestByGuest]);
+  }, [guests]);
 
   return (
     <section className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 mb-10">
@@ -456,19 +473,19 @@ function DraftField({
 
 type TableProps = {
   guests: Guest[];
-  latestByGuest: Map<string, Rsvp>;
   search: string;
   onToggleInvitation: (guest: Guest) => void;
   onCopyLink: (id: string) => void;
+  onSendWhatsApp: (guest: Guest) => void;
   onDelete: (guest: Guest) => void;
 };
 
 function GuestTable({
   guests,
-  latestByGuest,
   search,
   onToggleInvitation,
   onCopyLink,
+  onSendWhatsApp,
   onDelete,
 }: TableProps) {
   const filtered = useMemo(() => {
@@ -504,7 +521,6 @@ function GuestTable({
             </tr>
           )}
           {filtered.map((guest) => {
-            const rsvp = latestByGuest.get(guest.id);
             return (
               <tr key={guest.id} className="border-t border-bone hover:bg-soft/30 transition-colors">
                 <Td>
@@ -526,18 +542,21 @@ function GuestTable({
                   </label>
                 </Td>
                 <Td>
-                  <ResponsePill response={rsvp?.response} />
+                  <ResponsePill response={guest.response} />
                 </Td>
                 <Td>
-                  {rsvp?.response === "accept" ? (
-                    <SlotsCell adults={rsvp.adultsConfirmed} kids={rsvp.kidsConfirmed} />
+                  {guest.response === "accept" ? (
+                    <SlotsCell adults={guest.adultsConfirmed} kids={guest.kidsConfirmed} />
                   ) : (
                     "—"
                   )}
                 </Td>
-                <Td>{rsvp?.comment ?? ""}</Td>
+                <Td>{guest.comment ?? ""}</Td>
                 <Td>
                   <div className="flex gap-2 justify-end">
+                    <button className="icon-btn" onClick={() => onSendWhatsApp(guest)}>
+                      Enviar WhatsApp
+                    </button>
                     <button className="icon-btn" onClick={() => onCopyLink(guest.id)}>
                       Copiar link
                     </button>
@@ -678,7 +697,7 @@ function SlotsCell({ adults, kids }: { adults: number; kids: number }) {
   );
 }
 
-function ResponsePill({ response }: { response: Rsvp["response"] | undefined }) {
+function ResponsePill({ response }: { response?: "accept" | "decline" | "" }) {
   if (response === "accept") return <Pill variant="accept">Acepta</Pill>;
   if (response === "decline") return <Pill variant="decline">No puede</Pill>;
   return <Pill variant="neutral">Pendiente</Pill>;

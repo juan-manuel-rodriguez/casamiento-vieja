@@ -7,17 +7,13 @@ export type Guest = {
   adultSlots: number;
   kidSlots: number;
   invitationSent: boolean;
-  contact: string;
-  notes: string;
-};
-
-export type Rsvp = {
-  timestamp: string;
-  guestId: string;
-  response: "accept" | "decline" | string;
+  response: "accept" | "decline" | "";
   adultsConfirmed: number;
   kidsConfirmed: number;
   comment: string;
+  rsvpTimestamp: string;
+  contact: string;
+  notes: string;
 };
 
 /** Minimal projection of a guest exposed to the public guest page. */
@@ -38,22 +34,6 @@ export async function checkAuth(auth: string): Promise<void> {
 export async function listGuests(auth: string): Promise<Guest[]> {
   const response = await postJson<{ guests: Guest[] }>({ action: "listGuests", auth });
   return response.guests;
-}
-
-export async function listRsvps(auth: string): Promise<Rsvp[]> {
-  const response = await postJson<{ rsvps: Rsvp[] }>({ action: "listRsvps", auth });
-  return response.rsvps;
-}
-
-/** Build a guestId → latest Rsvp map. Latest is decided by timestamp string. */
-export function latestRsvpByGuestId(rsvps: Rsvp[]): Map<string, Rsvp> {
-  const map = new Map<string, Rsvp>();
-  for (const rsvp of rsvps) {
-    if (!rsvp.guestId) continue;
-    const prev = map.get(rsvp.guestId);
-    if (!prev || prev.timestamp < rsvp.timestamp) map.set(rsvp.guestId, rsvp);
-  }
-  return map;
 }
 
 /**
