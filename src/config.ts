@@ -41,12 +41,11 @@ export const EVENT = {
   rsvpDeadline: "20 de septiembre",
   giftMessage:
     "El mejor regalo es que nos acompañen en este día, pero si igual nos quieren hacer un regalo, pueden hacerlo acá.",
-  /** Banco donde están ambas cuentas. Sin esto no se puede transferir. */
-  giftBank: "Itaú",
-  giftAccountUyuLabel: "Cuenta en pesos",
-  giftAccountUyuValue: "9316139",
-  giftAccountUsdLabel: "Cuenta en dólares",
-  giftAccountUsdValue: "9316120",
+  /** Banco, tipo de cuenta y titular: los tres hacen falta para transferir. */
+  giftBank: "BBVA",
+  giftAccountLabel: "Cuenta única",
+  giftAccountValue: "22975926",
+  giftAccountHolder: "Juan Rodríguez",
   /** Spotify track URL para el reproductor que se muestra en la página del invitado. */
   spotifyTrackUrl: "https://open.spotify.com/track/6lanRgr6wXibZr8KgzXxBl",
 } as const;

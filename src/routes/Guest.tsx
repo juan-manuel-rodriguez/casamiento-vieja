@@ -302,23 +302,18 @@ function GiftAccountSection() {
         <p className="inline-flex items-center rounded-full border border-sand bg-soft/60 px-5 py-1.5 mb-5 text-[0.78rem] uppercase tracking-[0.2em] text-gold-dark font-medium">
           Banco {EVENT.giftBank}
         </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl mx-auto">
+        <div className="max-w-sm mx-auto">
           <div className="flex flex-col items-center gap-2 rounded-xl border border-bone bg-cream/40 px-6 py-5">
             <span className="text-[0.78rem] uppercase tracking-[0.22em] text-subtle font-medium">
-              {EVENT.giftAccountUyuLabel}
+              {EVENT.giftAccountLabel}
             </span>
-            <span className="font-sans text-lg sm:text-xl tracking-[0.04em] text-ink">
-              {EVENT.giftAccountUyuValue}
-            </span>
-          </div>
-          <div className="flex flex-col items-center gap-2 rounded-xl border border-bone bg-cream/40 px-6 py-5">
-            <span className="text-[0.78rem] uppercase tracking-[0.22em] text-subtle font-medium">
-              {EVENT.giftAccountUsdLabel}
-            </span>
-            <span className="font-sans text-lg sm:text-xl tracking-[0.04em] text-ink">
-              {EVENT.giftAccountUsdValue}
+            <span className="font-sans text-xl sm:text-2xl tracking-[0.06em] text-ink tabular-nums">
+              {EVENT.giftAccountValue}
             </span>
           </div>
+          <p className="text-[0.8rem] text-subtle mt-3">
+            La cuenta está a nombre de {EVENT.giftAccountHolder}.
+          </p>
         </div>
       </div>
     </Section>
