@@ -279,7 +279,9 @@ export function AdminPage() {
     filters.group !== "all";
 
   return (
-    <main className="max-w-6xl mx-auto px-6 py-8 pb-24 font-sans">
+    // Wider than the guest page on purpose: this is a data table, and 6xl was
+    // squeezing it into a horizontal scroll on a laptop screen.
+    <main className="max-w-400 mx-auto px-6 py-8 pb-24 font-sans">
       {busy && <BusyOverlay />}
       <Topbar onRefresh={() => void withBusy(() => refresh())} onSignOut={handleSignOut} />
       <Stats guests={guests} />
@@ -690,12 +692,9 @@ function GuestTable({
         <thead>
           <tr className="bg-cream">
             <Th>Invitado</Th>
-            <Th>Invita</Th>
             <Th>Grupo</Th>
             <Th>Cupos</Th>
-            <Th>Enviada</Th>
-            <Th>Respuesta</Th>
-            <Th>Confirmados</Th>
+            <Th>Estado</Th>
             <Th>Comentario</Th>
             <Th aria-label="Acciones"></Th>
           </tr>
@@ -703,7 +702,7 @@ function GuestTable({
         <tbody>
           {guests.length === 0 && (
             <tr>
-              <td colSpan={9} className="text-center text-subtle italic py-12 px-4">
+              <td colSpan={6} className="text-center text-subtle italic py-12 px-4">
                 {totalGuests === 0
                   ? "Todavía no hay invitados. Agregá el primero arriba."
                   : "Ningún invitado coincide con los filtros."}
@@ -714,15 +713,19 @@ function GuestTable({
             return (
               <tr key={guest.id} className="border-t border-bone hover:bg-soft/30 transition-colors">
                 <Td>
-                  <div className="font-medium text-ink whitespace-nowrap">{guest.name}</div>
-                  {/* The full uuid wrapped onto four lines and blew up the row
-                      height; the prefix is enough to eyeball, and the whole id
-                      is one hover (or the copy-link button) away. */}
-                  <div className="text-[0.78rem] text-subtle font-mono" title={guest.id}>
-                    {guest.id.slice(0, 8)}…
+                  <div className="font-medium text-ink">{guest.name}</div>
+                  {/* Side and id ride along under the name: both are worth a
+                      glance, neither deserves a column of its own. The full
+                      uuid is on hover — spelled out it wrapped over four lines
+                      and stretched every row. */}
+                  <div className="text-[0.78rem] text-subtle">
+                    {guestSideLabel(guest.side)}
+                    <span className="mx-1.5 text-bone">|</span>
+                    <span className="font-mono" title={guest.id}>
+                      {guest.id.slice(0, 8)}
+                    </span>
                   </div>
                 </Td>
-                <Td>{guestSideLabel(guest.side)}</Td>
                 <Td>
                   <select
                     className="w-44 px-2 py-1.5 border border-bone rounded bg-white text-sm text-ink cursor-pointer hover:border-sand focus:outline-none focus:border-gold"
@@ -741,28 +744,30 @@ function GuestTable({
                     )}
                   </select>
                 </Td>
+                {/* Invited vs confirmed in one column: the second number only
+                    means anything next to the first one. */}
                 <Td>
                   <SlotsCell adults={guest.adultSlots} kids={guest.kidSlots} />
-                </Td>
-                <Td>
-                  <input
-                    type="checkbox"
-                    className="admin-checkbox"
-                    checked={guest.invitationSent}
-                    onChange={() => onToggleInvitation(guest)}
-                    aria-label={`Invitación enviada a ${guest.name}`}
-                    title={guest.invitationSent ? "Invitación enviada" : "Invitación sin enviar"}
-                  />
-                </Td>
-                <Td>
-                  <ResponsePill response={guest.response} />
-                </Td>
-                <Td>
-                  {guest.response === "accept" ? (
-                    <SlotsCell adults={guest.adultsConfirmed} kids={guest.kidsConfirmed} />
-                  ) : (
-                    "—"
+                  {guest.response === "accept" && (
+                    <div className="text-[0.78rem] text-success tabular-nums">
+                      vienen {guest.adultsConfirmed}A
+                      {guest.kidsConfirmed > 0 && ` · ${guest.kidsConfirmed}N`}
+                    </div>
                   )}
+                </Td>
+                {/* Sent + answered is a single workflow state, so one column. */}
+                <Td>
+                  <div className="flex items-center gap-2.5">
+                    <input
+                      type="checkbox"
+                      className="admin-checkbox"
+                      checked={guest.invitationSent}
+                      onChange={() => onToggleInvitation(guest)}
+                      aria-label={`Invitación enviada a ${guest.name}`}
+                      title={guest.invitationSent ? "Invitación enviada" : "Invitación sin enviar"}
+                    />
+                    <ResponsePill response={guest.response} />
+                  </div>
                 </Td>
                 <Td wrap>{guest.comment ?? ""}</Td>
                 <Td>
