@@ -21,6 +21,7 @@ export const GUEST_GROUPS: GuestGroup[] = [
   { number: 6, name: "Familia Juan" },
   { number: 7, name: "Familia Vale" },
   { number: 8, name: "Amoeba" },
+  { number: 9, name: "Familia Andino" },
 ];
 
 /** "4 · Amigos 2inn" for known groups, the raw value for anything else. */

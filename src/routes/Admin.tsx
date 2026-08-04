@@ -714,13 +714,18 @@ function GuestTable({
             return (
               <tr key={guest.id} className="border-t border-bone hover:bg-soft/30 transition-colors">
                 <Td>
-                  <div className="font-medium text-ink">{guest.name}</div>
-                  <div className="text-[0.78rem] text-subtle font-mono">{guest.id}</div>
+                  <div className="font-medium text-ink whitespace-nowrap">{guest.name}</div>
+                  {/* The full uuid wrapped onto four lines and blew up the row
+                      height; the prefix is enough to eyeball, and the whole id
+                      is one hover (or the copy-link button) away. */}
+                  <div className="text-[0.78rem] text-subtle font-mono" title={guest.id}>
+                    {guest.id.slice(0, 8)}…
+                  </div>
                 </Td>
                 <Td>{guestSideLabel(guest.side)}</Td>
                 <Td>
                   <select
-                    className="max-w-44 px-2 py-1.5 border border-bone rounded bg-white text-sm text-ink cursor-pointer hover:border-sand focus:outline-none focus:border-gold"
+                    className="w-44 px-2 py-1.5 border border-bone rounded bg-white text-sm text-ink cursor-pointer hover:border-sand focus:outline-none focus:border-gold"
                     value={guest.group || ""}
                     aria-label={`Grupo de ${guest.name}`}
                     onChange={(e) => onChangeGroup(guest, e.target.value)}
@@ -759,7 +764,7 @@ function GuestTable({
                     "—"
                   )}
                 </Td>
-                <Td>{guest.comment ?? ""}</Td>
+                <Td wrap>{guest.comment ?? ""}</Td>
                 <Td>
                   <div className="flex gap-1.5 justify-end">
                     <button
@@ -806,15 +811,25 @@ function guestSideLabel(side: Guest["side"]) {
 function Th({ children, ...rest }: React.ThHTMLAttributes<HTMLTableCellElement>) {
   return (
     <th
-      className="text-left px-4 py-3 text-[0.78rem] uppercase tracking-[0.16em] font-medium text-muted"
+      className="text-left px-4 py-3 text-[0.78rem] uppercase tracking-[0.16em] font-medium text-muted whitespace-nowrap"
       {...rest}
     >
       {children}
     </th>
   );
 }
-function Td({ children }: { children: React.ReactNode }) {
-  return <td className="px-4 py-3 align-middle">{children}</td>;
+
+/**
+ * Cells default to a single line so rows stay one height and the table reads
+ * as a grid. `wrap` is for free text (comments), the only column where
+ * breaking is better than a wide cell.
+ */
+function Td({ children, wrap = false }: { children: React.ReactNode; wrap?: boolean }) {
+  return (
+    <td className={`px-4 py-3 align-middle ${wrap ? "max-w-xs" : "whitespace-nowrap"}`}>
+      {children}
+    </td>
+  );
 }
 
 function SongRecommendationsSection({
