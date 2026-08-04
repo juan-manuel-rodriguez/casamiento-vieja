@@ -844,7 +844,6 @@ type GroupBreakdown = {
   /** Group name, "" for unassigned. */
   key: string;
   label: string;
-  invitations: number;
   invited: number;
   confirmed: number;
   pending: number;
@@ -867,7 +866,6 @@ function buildGroupBreakdown(guests: Guest[]): GroupBreakdown[] {
       row = {
         key,
         label: groupLabel(key),
-        invitations: 0,
         invited: 0,
         confirmed: 0,
         pending: 0,
@@ -876,7 +874,6 @@ function buildGroupBreakdown(guests: Guest[]): GroupBreakdown[] {
       rows.set(key, row);
     }
     const invited = guest.adultSlots + guest.kidSlots;
-    row.invitations += 1;
     row.invited += invited;
     if (guest.response === "accept") {
       row.confirmed += guest.adultsConfirmed + guest.kidsConfirmed;
@@ -899,13 +896,12 @@ function SeatingSection({ guests }: { guests: Guest[] }) {
   const rows = useMemo(() => buildGroupBreakdown(guests), [guests]);
   const totals = rows.reduce(
     (acc, row) => ({
-      invitations: acc.invitations + row.invitations,
       invited: acc.invited + row.invited,
       confirmed: acc.confirmed + row.confirmed,
       pending: acc.pending + row.pending,
       declined: acc.declined + row.declined,
     }),
-    { invitations: 0, invited: 0, confirmed: 0, pending: 0, declined: 0 },
+    { invited: 0, confirmed: 0, pending: 0, declined: 0 },
   );
   const worstCase = totals.confirmed + totals.pending;
   const seatsLeft = TOTAL_SEATS - totals.confirmed;
@@ -955,7 +951,7 @@ function SeatingSection({ guests }: { guests: Guest[] }) {
           <thead>
             <tr className="bg-cream">
               <Th>Grupo</Th>
-              <Th>Invitaciones</Th>
+              <Th>Invitados</Th>
               <Th>Confirmados</Th>
               <Th>Pendientes</Th>
               <Th>No vienen</Th>
@@ -975,7 +971,7 @@ function SeatingSection({ guests }: { guests: Guest[] }) {
                   <span className={row.key ? "text-ink" : "text-subtle italic"}>{row.label}</span>
                 </Td>
                 <Td>
-                  <span className="tabular-nums text-muted">{row.invitations}</span>
+                  <span className="tabular-nums text-ink">{row.invited}</span>
                 </Td>
                 <Td>
                   <span className="tabular-nums font-medium text-success">{row.confirmed}</span>
@@ -992,7 +988,7 @@ function SeatingSection({ guests }: { guests: Guest[] }) {
               <tr className="border-t border-bone bg-cream/60 font-medium">
                 <Td>Total</Td>
                 <Td>
-                  <span className="tabular-nums">{totals.invitations}</span>
+                  <span className="tabular-nums">{totals.invited}</span>
                 </Td>
                 <Td>
                   <span className="tabular-nums text-success">{totals.confirmed}</span>
