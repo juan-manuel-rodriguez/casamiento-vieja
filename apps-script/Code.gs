@@ -57,6 +57,7 @@ var GUESTS_HEADERS = [
   'contact',
   'notes',
   'side',
+  'group',
 ];
 
 /** @const {Array<string>} */
@@ -87,7 +88,7 @@ var ADMIN_PASSPHRASE_KEY = 'ADMIN_PASSPHRASE';
  * deployment" mints a second URL instead of updating the one the app calls.
  * @const {string}
  */
-var CODE_VERSION = '2026-08-02.1';
+var CODE_VERSION = '2026-08-04.1';
 
 // ---------- Public bootstrap ----------
 
@@ -117,20 +118,22 @@ function dropLegacyRsvpsSheet_() {
 }
 
 /**
- * Columns holding free text (name, comment, contact, notes) are forced to the
- * plain-text number format. Otherwise Sheets parses a value starting with "+"
- * or "=" — a phone like "+598 99 123 456", or a comment like "+1 amigo" — as
- * a formula and the cell renders "Error de análisis de fórmula" instead of
- * the text. Cheap enough to call on every request: one getNumberFormat read
- * short-circuits it once the format is already applied.
+ * Columns holding free text (name, comment, contact, notes, group) are forced
+ * to the plain-text number format. Otherwise Sheets parses a value starting
+ * with "+" or "=" — a phone like "+598 99 123 456", or a comment like "+1
+ * amigo" — as a formula and the cell renders "Error de análisis de fórmula"
+ * instead of the text. Cheap enough to call on every request: one
+ * getNumberFormat read short-circuits it once the format is applied. The
+ * guard reads the LAST column in the list, so appending a column here still
+ * triggers a reformat on the next request.
  * @const {Array<number>} 1-based indexes into GUESTS_HEADERS.
  */
-var TEXT_COLUMNS_ = [2, 9, 11, 12];
+var TEXT_COLUMNS_ = [2, 9, 11, 12, 14];
 
 function ensureTextColumns_() {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(GUESTS_TAB);
   if (!sheet) return;
-  if (sheet.getRange(2, TEXT_COLUMNS_[0]).getNumberFormat() === '@') return;
+  if (sheet.getRange(2, TEXT_COLUMNS_[TEXT_COLUMNS_.length - 1]).getNumberFormat() === '@') return;
   var rowCount = sheet.getMaxRows() - 1;
   if (rowCount < 1) return;
   for (var i = 0; i < TEXT_COLUMNS_.length; i++) {
@@ -171,6 +174,7 @@ function migrateGuestsFromPlusOnes_() {
       '',
       r[4],
       r[5],
+      '',
       '',
     ];
   });
@@ -505,6 +509,7 @@ function handleSubmitRsvp_(params) {
       guest.contact,
       guest.notes,
       guest.side,
+      guest.group,
     ];
     sheet.getRange(guest.rowIndex, 1, 1, row.length).setValues([row]);
     return { ok: true };
@@ -591,6 +596,9 @@ function handleUpsertGuest_(params) {
   if (side !== 'vale' && side !== 'juan') side = '';
   var contact = input.contact == null ? '' : String(input.contact);
   var notes = input.notes == null ? '' : String(input.notes);
+  // Free text on purpose: the group list lives in the frontend, and a value
+  // typed straight into the sheet should survive an edit from the admin.
+  var group = input.group == null ? '' : String(input.group).trim();
 
   return withWriteLock_(function () {
     var sheet = sheetByName_(GUESTS_TAB);
@@ -611,6 +619,7 @@ function handleUpsertGuest_(params) {
       contact,
       notes,
       side,
+      group,
     ];
     if (existing) {
       sheet.getRange(existing.rowIndex, 1, 1, row.length).setValues([row]);
@@ -713,7 +722,7 @@ function ensureSheetWithHeaders_(name, headers) {
  *           kidSlots: number, invitationSent: boolean, response: string,
  *           adultsConfirmed: number, kidsConfirmed: number, comment: string,
  *           rsvpTimestamp: string, contact: string, notes: string,
- *           side: string}} Guest
+ *           side: string, group: string}} Guest
  */
 
 /**
@@ -786,6 +795,7 @@ function mapGuestRow_(row, rowIndex) {
     contact: String(row[10] || ''),
     notes: String(row[11] || ''),
     side: String(row[12] || ''),
+    group: String(row[13] || ''),
   };
 }
 

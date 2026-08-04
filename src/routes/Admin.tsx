@@ -14,6 +14,7 @@ import {
   type SongRecommendation,
 } from "../api/songs";
 import { clearPassphrase, loadPassphrase, savePassphrase } from "../auth/passphrase";
+import { GUEST_GROUPS, groupLabel } from "../lib/groups";
 import { firstName } from "../lib/names";
 
 type ViewState =
@@ -33,6 +34,7 @@ const EMPTY_DRAFT: NewGuestDraft = {
   adultSlots: 1,
   kidSlots: 0,
   side: "",
+  group: "",
   contact: "",
   notes: "",
 };
@@ -42,9 +44,17 @@ type Filters = {
   side: "all" | "vale" | "juan" | "unassigned";
   response: "all" | "pending" | "accept" | "decline";
   sent: "all" | "sent" | "unsent";
+  /** "all", "none", or a group name. */
+  group: string;
 };
 
-const EMPTY_FILTERS: Filters = { search: "", side: "all", response: "all", sent: "all" };
+const EMPTY_FILTERS: Filters = {
+  search: "",
+  side: "all",
+  response: "all",
+  sent: "all",
+  group: "all",
+};
 
 function applyFilters(guests: Guest[], filters: Filters): Guest[] {
   const needle = filters.search.trim().toLowerCase();
@@ -63,6 +73,12 @@ function applyFilters(guests: Guest[], filters: Filters): Guest[] {
 
     if (filters.sent === "sent" && !guest.invitationSent) return false;
     if (filters.sent === "unsent" && guest.invitationSent) return false;
+
+    const group = guest.group || "";
+    if (filters.group === "none" && group) return false;
+    if (filters.group !== "all" && filters.group !== "none" && group !== filters.group) {
+      return false;
+    }
 
     return true;
   });
@@ -147,6 +163,18 @@ export function AdminPage() {
     await withBusy(async () => {
       try {
         await upsertGuest(auth, { ...guest, invitationSent: !guest.invitationSent });
+        await refresh();
+      } catch (err) {
+        setView({ kind: "error", message: errorMessage(err) });
+      }
+    });
+  }
+
+  async function changeGroup(guest: Guest, group: string) {
+    if (!auth || group === (guest.group || "")) return;
+    await withBusy(async () => {
+      try {
+        await upsertGuest(auth, { ...guest, group });
         await refresh();
       } catch (err) {
         setView({ kind: "error", message: errorMessage(err) });
@@ -247,7 +275,8 @@ export function AdminPage() {
     filters.search.trim() !== "" ||
     filters.side !== "all" ||
     filters.response !== "all" ||
-    filters.sent !== "all";
+    filters.sent !== "all" ||
+    filters.group !== "all";
 
   return (
     <main className="max-w-6xl mx-auto px-6 py-8 pb-24 font-sans">
@@ -304,6 +333,20 @@ export function AdminPage() {
                 <option value="">Sin asignar</option>
                 <option value="vale">Vale</option>
                 <option value="juan">Juan</option>
+              </select>
+            </DraftField>
+            <DraftField label="Grupo">
+              <select
+                className="admin-input"
+                value={draft.group}
+                onChange={(e) => setDraft({ ...draft, group: e.target.value })}
+              >
+                <option value="">Sin grupo</option>
+                {GUEST_GROUPS.map((group) => (
+                  <option key={group.number} value={group.name}>
+                    {groupLabel(group.name)}
+                  </option>
+                ))}
               </select>
             </DraftField>
             <DraftField label="Contacto">
@@ -378,6 +421,19 @@ export function AdminPage() {
             { value: "unsent", label: "Sin enviar" },
           ]}
         />
+        <FilterSelect
+          label="Grupo"
+          value={filters.group}
+          onChange={(group) => setFilters({ ...filters, group })}
+          options={[
+            { value: "all", label: "Grupo: todos" },
+            ...GUEST_GROUPS.map((group) => ({
+              value: group.name,
+              label: groupLabel(group.name),
+            })),
+            { value: "none", label: "Sin grupo" },
+          ]}
+        />
       </div>
 
       <div className="flex flex-wrap gap-3 items-center mb-4 text-sm text-muted">
@@ -399,6 +455,7 @@ export function AdminPage() {
       <GuestTable
         guests={filtered}
         totalGuests={guests.length}
+        onChangeGroup={changeGroup}
         onToggleInvitation={toggleInvitationSent}
         onCopyLink={copyGuestLink}
         onSendWhatsApp={sendInvitationWhatsApp}
@@ -611,6 +668,7 @@ type TableProps = {
   guests: Guest[];
   /** Unfiltered count, so the empty state can tell "no guests" from "no matches". */
   totalGuests: number;
+  onChangeGroup: (guest: Guest, group: string) => void;
   onToggleInvitation: (guest: Guest) => void;
   onCopyLink: (id: string) => void;
   onSendWhatsApp: (guest: Guest) => void;
@@ -620,6 +678,7 @@ type TableProps = {
 function GuestTable({
   guests,
   totalGuests,
+  onChangeGroup,
   onToggleInvitation,
   onCopyLink,
   onSendWhatsApp,
@@ -632,6 +691,7 @@ function GuestTable({
           <tr className="bg-cream">
             <Th>Invitado</Th>
             <Th>Invita</Th>
+            <Th>Grupo</Th>
             <Th>Cupos</Th>
             <Th>Enviada</Th>
             <Th>Respuesta</Th>
@@ -643,7 +703,7 @@ function GuestTable({
         <tbody>
           {guests.length === 0 && (
             <tr>
-              <td colSpan={8} className="text-center text-subtle italic py-12 px-4">
+              <td colSpan={9} className="text-center text-subtle italic py-12 px-4">
                 {totalGuests === 0
                   ? "Todavía no hay invitados. Agregá el primero arriba."
                   : "Ningún invitado coincide con los filtros."}
@@ -658,6 +718,24 @@ function GuestTable({
                   <div className="text-[0.78rem] text-subtle font-mono">{guest.id}</div>
                 </Td>
                 <Td>{guestSideLabel(guest.side)}</Td>
+                <Td>
+                  <select
+                    className="max-w-44 px-2 py-1.5 border border-bone rounded bg-white text-sm text-ink cursor-pointer hover:border-sand focus:outline-none focus:border-gold"
+                    value={guest.group || ""}
+                    aria-label={`Grupo de ${guest.name}`}
+                    onChange={(e) => onChangeGroup(guest, e.target.value)}
+                  >
+                    <option value="">Sin grupo</option>
+                    {GUEST_GROUPS.map((group) => (
+                      <option key={group.number} value={group.name}>
+                        {groupLabel(group.name)}
+                      </option>
+                    ))}
+                    {guest.group && !GUEST_GROUPS.some((g) => g.name === guest.group) && (
+                      <option value={guest.group}>{guest.group}</option>
+                    )}
+                  </select>
+                </Td>
                 <Td>
                   <SlotsCell adults={guest.adultSlots} kids={guest.kidSlots} />
                 </Td>
