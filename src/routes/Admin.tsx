@@ -16,6 +16,7 @@ import {
 import { clearPassphrase, loadPassphrase, savePassphrase } from "../auth/passphrase";
 import { GUEST_GROUPS, groupLabel } from "../lib/groups";
 import { firstName } from "../lib/names";
+import { TOTAL_SEATS, TOTAL_TABLES, VENUE_TABLES, listTables } from "../lib/tables";
 
 type ViewState =
   | { kind: "needs-passphrase"; error?: string }
@@ -464,6 +465,8 @@ export function AdminPage() {
         onDelete={handleDelete}
       />
 
+      <SeatingSection guests={guests} />
+
       <SongRecommendationsSection
         recommendations={songRecommendations}
         guests={guests}
@@ -834,6 +837,178 @@ function Td({ children, wrap = false }: { children: React.ReactNode; wrap?: bool
     <td className={`px-4 py-3 align-middle ${wrap ? "max-w-xs" : "whitespace-nowrap"}`}>
       {children}
     </td>
+  );
+}
+
+type GroupBreakdown = {
+  /** Group name, "" for unassigned. */
+  key: string;
+  label: string;
+  invitations: number;
+  invited: number;
+  confirmed: number;
+  pending: number;
+  declined: number;
+};
+
+/**
+ * People counts per group, not invitation counts: seating cares about bodies.
+ * A guest who hasn't answered contributes their full slots to `pending`, since
+ * that is the worst case a table has to absorb.
+ */
+function buildGroupBreakdown(guests: Guest[]): GroupBreakdown[] {
+  const order = new Map(GUEST_GROUPS.map((group, index) => [group.name, index]));
+  const rows = new Map<string, GroupBreakdown>();
+
+  for (const guest of guests) {
+    const key = guest.group || "";
+    let row = rows.get(key);
+    if (!row) {
+      row = {
+        key,
+        label: groupLabel(key),
+        invitations: 0,
+        invited: 0,
+        confirmed: 0,
+        pending: 0,
+        declined: 0,
+      };
+      rows.set(key, row);
+    }
+    const invited = guest.adultSlots + guest.kidSlots;
+    row.invitations += 1;
+    row.invited += invited;
+    if (guest.response === "accept") {
+      row.confirmed += guest.adultsConfirmed + guest.kidsConfirmed;
+    } else if (guest.response === "decline") {
+      row.declined += invited;
+    } else {
+      row.pending += invited;
+    }
+  }
+
+  return [...rows.values()].sort((a, b) => {
+    if (!a.key !== !b.key) return a.key ? -1 : 1; // "Sin grupo" always last
+    const orderA = order.get(a.key) ?? Number.MAX_SAFE_INTEGER;
+    const orderB = order.get(b.key) ?? Number.MAX_SAFE_INTEGER;
+    return orderA - orderB || a.label.localeCompare(b.label);
+  });
+}
+
+function SeatingSection({ guests }: { guests: Guest[] }) {
+  const rows = useMemo(() => buildGroupBreakdown(guests), [guests]);
+  const totals = rows.reduce(
+    (acc, row) => ({
+      invitations: acc.invitations + row.invitations,
+      invited: acc.invited + row.invited,
+      confirmed: acc.confirmed + row.confirmed,
+      pending: acc.pending + row.pending,
+      declined: acc.declined + row.declined,
+    }),
+    { invitations: 0, invited: 0, confirmed: 0, pending: 0, declined: 0 },
+  );
+  const worstCase = totals.confirmed + totals.pending;
+  const seatsLeft = TOTAL_SEATS - totals.confirmed;
+
+  return (
+    <section className="mt-12">
+      <header className="flex items-baseline justify-between mb-4">
+        <h2 className="font-display italic text-2xl m-0">Mesas y grupos</h2>
+        <span className="text-sm text-muted tabular-nums">
+          {totals.confirmed} de {TOTAL_SEATS} lugares
+        </span>
+      </header>
+
+      <div className="bg-white border border-bone rounded-lg shadow-sm p-6 mb-4">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-4">
+          <span className="text-[0.78rem] uppercase tracking-[0.16em] text-muted font-medium">
+            {TOTAL_TABLES} mesas · {TOTAL_SEATS} lugares
+          </span>
+          <span className="text-sm text-subtle">
+            {VENUE_TABLES.map((spec) => `${spec.count} de ${spec.seats}`).join(" · ")}
+          </span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {listTables().map((table) => (
+            <span
+              key={table.number}
+              className="inline-flex items-baseline gap-2 rounded-full border border-bone bg-cream/50 px-4 py-1.5 text-sm"
+            >
+              <span className="text-muted">Mesa {table.number}</span>
+              <span className="font-medium text-ink tabular-nums">{table.seats}</span>
+            </span>
+          ))}
+        </div>
+        <p className="text-sm text-muted mt-4">
+          {seatsLeft >= 0
+            ? `Quedan ${seatsLeft} lugares libres.`
+            : `Te faltan ${Math.abs(seatsLeft)} lugares.`}{" "}
+          {totals.pending > 0 &&
+            (worstCase > TOTAL_SEATS
+              ? `Si contestan que sí los ${totals.pending} pendientes, te pasás por ${worstCase - TOTAL_SEATS}.`
+              : `Si vienen todos los ${totals.pending} pendientes, entran igual.`)}
+        </p>
+      </div>
+
+      <div className="bg-white border border-bone rounded-lg overflow-hidden shadow-sm overflow-x-auto">
+        <table className="w-full border-collapse text-sm">
+          <thead>
+            <tr className="bg-cream">
+              <Th>Grupo</Th>
+              <Th>Invitaciones</Th>
+              <Th>Confirmados</Th>
+              <Th>Pendientes</Th>
+              <Th>No vienen</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={5} className="text-center text-subtle italic py-10 px-4">
+                  Todavía no hay invitados para repartir.
+                </td>
+              </tr>
+            )}
+            {rows.map((row) => (
+              <tr key={row.key || "none"} className="border-t border-bone">
+                <Td>
+                  <span className={row.key ? "text-ink" : "text-subtle italic"}>{row.label}</span>
+                </Td>
+                <Td>
+                  <span className="tabular-nums text-muted">{row.invitations}</span>
+                </Td>
+                <Td>
+                  <span className="tabular-nums font-medium text-success">{row.confirmed}</span>
+                </Td>
+                <Td>
+                  <span className="tabular-nums text-muted">{row.pending}</span>
+                </Td>
+                <Td>
+                  <span className="tabular-nums text-subtle">{row.declined}</span>
+                </Td>
+              </tr>
+            ))}
+            {rows.length > 0 && (
+              <tr className="border-t border-bone bg-cream/60 font-medium">
+                <Td>Total</Td>
+                <Td>
+                  <span className="tabular-nums">{totals.invitations}</span>
+                </Td>
+                <Td>
+                  <span className="tabular-nums text-success">{totals.confirmed}</span>
+                </Td>
+                <Td>
+                  <span className="tabular-nums">{totals.pending}</span>
+                </Td>
+                <Td>
+                  <span className="tabular-nums">{totals.declined}</span>
+                </Td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
