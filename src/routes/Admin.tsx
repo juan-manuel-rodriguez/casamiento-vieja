@@ -14,9 +14,14 @@ import {
   type SongRecommendation,
 } from "../api/songs";
 import { clearPassphrase, loadPassphrase, savePassphrase } from "../auth/passphrase";
-import { GUEST_GROUPS, groupLabel } from "../lib/groups";
 import { firstName } from "../lib/names";
-import { TOTAL_SEATS, TOTAL_TABLES, VENUE_TABLES, listTables } from "../lib/tables";
+import {
+  TOTAL_SEATS,
+  TOTAL_TABLES,
+  VENUE_TABLES,
+  type VenueTable,
+  tablesByZone,
+} from "../lib/tables";
 
 type ViewState =
   | { kind: "needs-passphrase"; error?: string }
@@ -35,7 +40,7 @@ const EMPTY_DRAFT: NewGuestDraft = {
   adultSlots: 1,
   kidSlots: 0,
   side: "",
-  group: "",
+  table: "",
   contact: "",
   notes: "",
 };
@@ -45,8 +50,8 @@ type Filters = {
   side: "all" | "vale" | "juan" | "unassigned";
   response: "all" | "pending" | "accept" | "decline";
   sent: "all" | "sent" | "unsent";
-  /** "all", "none", or a group name. */
-  group: string;
+  /** "all", "none", or a table number as text. */
+  table: string;
 };
 
 const EMPTY_FILTERS: Filters = {
@@ -54,8 +59,16 @@ const EMPTY_FILTERS: Filters = {
   side: "all",
   response: "all",
   sent: "all",
-  group: "all",
+  table: "all",
 };
+
+type TabId = "guests" | "tables" | "songs";
+
+const TABS: Array<{ id: TabId; label: string }> = [
+  { id: "guests", label: "Invitados" },
+  { id: "tables", label: "Mesas" },
+  { id: "songs", label: "Canciones" },
+];
 
 function applyFilters(guests: Guest[], filters: Filters): Guest[] {
   const needle = filters.search.trim().toLowerCase();
@@ -75,9 +88,9 @@ function applyFilters(guests: Guest[], filters: Filters): Guest[] {
     if (filters.sent === "sent" && !guest.invitationSent) return false;
     if (filters.sent === "unsent" && guest.invitationSent) return false;
 
-    const group = guest.group || "";
-    if (filters.group === "none" && group) return false;
-    if (filters.group !== "all" && filters.group !== "none" && group !== filters.group) {
+    const table = guest.table || "";
+    if (filters.table === "none" && table) return false;
+    if (filters.table !== "all" && filters.table !== "none" && table !== filters.table) {
       return false;
     }
 
@@ -93,6 +106,7 @@ export function AdminPage() {
   const [draft, setDraft] = useState<NewGuestDraft>(EMPTY_DRAFT);
   const [saving, setSaving] = useState(false);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const [tab, setTab] = useState<TabId>("guests");
   const [busy, setBusy] = useState(false);
 
   async function withBusy(fn: () => Promise<void>): Promise<void> {
@@ -171,11 +185,11 @@ export function AdminPage() {
     });
   }
 
-  async function changeGroup(guest: Guest, group: string) {
-    if (!auth || group === (guest.group || "")) return;
+  async function changeTable(guest: Guest, table: string) {
+    if (!auth || table === (guest.table || "")) return;
     await withBusy(async () => {
       try {
-        await upsertGuest(auth, { ...guest, group });
+        await upsertGuest(auth, { ...guest, table });
         await refresh();
       } catch (err) {
         setView({ kind: "error", message: errorMessage(err) });
@@ -277,7 +291,7 @@ export function AdminPage() {
     filters.side !== "all" ||
     filters.response !== "all" ||
     filters.sent !== "all" ||
-    filters.group !== "all";
+    filters.table !== "all";
 
   return (
     // Wider than the guest page on purpose: this is a data table, and 6xl was
@@ -287,6 +301,24 @@ export function AdminPage() {
       <Topbar onRefresh={() => void withBusy(() => refresh())} onSignOut={handleSignOut} />
       <Stats guests={guests} />
 
+      <div className="flex gap-6 border-b border-bone mb-8">
+        {TABS.map((entry) => (
+          <button
+            key={entry.id}
+            onClick={() => setTab(entry.id)}
+            className={`-mb-px px-1 pb-3 text-sm font-medium tracking-[0.04em] border-b-2 cursor-pointer transition-colors ${
+              tab === entry.id
+                ? "border-ink text-ink"
+                : "border-transparent text-muted hover:text-ink"
+            }`}
+          >
+            {entry.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "guests" && (
+        <>
       <details className="bg-white border border-bone rounded-lg p-6 mb-8 shadow-sm group">
         <summary className="cursor-pointer font-medium text-sm flex items-center gap-3 list-none [&::-webkit-details-marker]:hidden">
           <span className="w-6 h-6 rounded-full bg-ink text-white inline-flex items-center justify-center text-base leading-none transition-transform group-open:rotate-45">
@@ -338,16 +370,16 @@ export function AdminPage() {
                 <option value="juan">Juan</option>
               </select>
             </DraftField>
-            <DraftField label="Grupo">
+            <DraftField label="Mesa">
               <select
                 className="admin-input"
-                value={draft.group}
-                onChange={(e) => setDraft({ ...draft, group: e.target.value })}
+                value={draft.table}
+                onChange={(e) => setDraft({ ...draft, table: e.target.value })}
               >
-                <option value="">Sin grupo</option>
-                {GUEST_GROUPS.map((group) => (
-                  <option key={group.number} value={group.name}>
-                    {groupLabel(group.name)}
+                <option value="">Sin mesa</option>
+                {VENUE_TABLES.map((table) => (
+                  <option key={table.number} value={String(table.number)}>
+                    Mesa {table.number} · {table.seats} lugares
                   </option>
                 ))}
               </select>
@@ -425,16 +457,16 @@ export function AdminPage() {
           ]}
         />
         <FilterSelect
-          label="Grupo"
-          value={filters.group}
-          onChange={(group) => setFilters({ ...filters, group })}
+          label="Mesa"
+          value={filters.table}
+          onChange={(table) => setFilters({ ...filters, table })}
           options={[
-            { value: "all", label: "Grupo: todos" },
-            ...GUEST_GROUPS.map((group) => ({
-              value: group.name,
-              label: groupLabel(group.name),
+            { value: "all", label: "Mesa: todas" },
+            ...VENUE_TABLES.map((table) => ({
+              value: String(table.number),
+              label: `Mesa ${table.number} · ${table.seats}`,
             })),
-            { value: "none", label: "Sin grupo" },
+            { value: "none", label: "Sin mesa" },
           ]}
         />
       </div>
@@ -458,19 +490,20 @@ export function AdminPage() {
       <GuestTable
         guests={filtered}
         totalGuests={guests.length}
-        onChangeGroup={changeGroup}
+        onChangeTable={changeTable}
         onToggleInvitation={toggleInvitationSent}
         onCopyLink={copyGuestLink}
         onSendWhatsApp={sendInvitationWhatsApp}
         onDelete={handleDelete}
       />
+        </>
+      )}
 
-      <SeatingSection guests={guests} />
+      {tab === "tables" && <TablesTab guests={guests} />}
 
-      <SongRecommendationsSection
-        recommendations={songRecommendations}
-        guests={guests}
-      />
+      {tab === "songs" && (
+        <SongRecommendationsSection recommendations={songRecommendations} guests={guests} />
+      )}
     </main>
   );
 }
@@ -673,7 +706,7 @@ type TableProps = {
   guests: Guest[];
   /** Unfiltered count, so the empty state can tell "no guests" from "no matches". */
   totalGuests: number;
-  onChangeGroup: (guest: Guest, group: string) => void;
+  onChangeTable: (guest: Guest, table: string) => void;
   onToggleInvitation: (guest: Guest) => void;
   onCopyLink: (id: string) => void;
   onSendWhatsApp: (guest: Guest) => void;
@@ -683,7 +716,7 @@ type TableProps = {
 function GuestTable({
   guests,
   totalGuests,
-  onChangeGroup,
+  onChangeTable,
   onToggleInvitation,
   onCopyLink,
   onSendWhatsApp,
@@ -695,7 +728,7 @@ function GuestTable({
         <thead>
           <tr className="bg-cream">
             <Th>Invitado</Th>
-            <Th>Grupo</Th>
+            <Th>Mesa</Th>
             <Th>Cupos</Th>
             <Th>Estado</Th>
             <Th>Comentario</Th>
@@ -731,20 +764,17 @@ function GuestTable({
                 </Td>
                 <Td>
                   <select
-                    className="w-44 px-2 py-1.5 border border-bone rounded bg-white text-sm text-ink cursor-pointer hover:border-sand focus:outline-none focus:border-gold"
-                    value={guest.group || ""}
-                    aria-label={`Grupo de ${guest.name}`}
-                    onChange={(e) => onChangeGroup(guest, e.target.value)}
+                    className="w-36 px-2 py-1.5 border border-bone rounded bg-white text-sm text-ink cursor-pointer hover:border-sand focus:outline-none focus:border-gold"
+                    value={guest.table || ""}
+                    aria-label={`Mesa de ${guest.name}`}
+                    onChange={(e) => onChangeTable(guest, e.target.value)}
                   >
-                    <option value="">Sin grupo</option>
-                    {GUEST_GROUPS.map((group) => (
-                      <option key={group.number} value={group.name}>
-                        {groupLabel(group.name)}
+                    <option value="">Sin mesa</option>
+                    {VENUE_TABLES.map((table) => (
+                      <option key={table.number} value={String(table.number)}>
+                        Mesa {table.number} · {table.seats}
                       </option>
                     ))}
-                    {guest.group && !GUEST_GROUPS.some((g) => g.name === guest.group) && (
-                      <option value={guest.group}>{guest.group}</option>
-                    )}
                   </select>
                 </Td>
                 {/* Invited vs confirmed in one column: the second number only
@@ -840,173 +870,167 @@ function Td({ children, wrap = false }: { children: React.ReactNode; wrap?: bool
   );
 }
 
-type GroupBreakdown = {
-  /** Group name, "" for unassigned. */
-  key: string;
-  label: string;
-  invited: number;
+type TableOccupancy = {
+  table: VenueTable;
+  /** Guests seated here, declined ones dropped: they free their seats. */
+  guests: Guest[];
   confirmed: number;
   pending: number;
-  declined: number;
 };
 
 /**
- * People counts per group, not invitation counts: seating cares about bodies.
- * A guest who hasn't answered contributes their full slots to `pending`, since
- * that is the worst case a table has to absorb.
+ * Headcount per table. A guest who has not answered still holds their full
+ * slots, since that is what the table has to absorb if they show up.
  */
-function buildGroupBreakdown(guests: Guest[]): GroupBreakdown[] {
-  const order = new Map(GUEST_GROUPS.map((group, index) => [group.name, index]));
-  const rows = new Map<string, GroupBreakdown>();
-
-  for (const guest of guests) {
-    const key = guest.group || "";
-    let row = rows.get(key);
-    if (!row) {
-      row = {
-        key,
-        label: groupLabel(key),
-        invited: 0,
-        confirmed: 0,
-        pending: 0,
-        declined: 0,
-      };
-      rows.set(key, row);
-    }
-    const invited = guest.adultSlots + guest.kidSlots;
-    row.invited += invited;
-    if (guest.response === "accept") {
-      row.confirmed += guest.adultsConfirmed + guest.kidsConfirmed;
-    } else if (guest.response === "decline") {
-      row.declined += invited;
-    } else {
-      row.pending += invited;
-    }
+function buildOccupancy(guests: Guest[]): {
+  tables: TableOccupancy[];
+  unseated: Guest[];
+  unseatedPeople: number;
+} {
+  const byTable = new Map<number, TableOccupancy>();
+  for (const table of VENUE_TABLES) {
+    byTable.set(table.number, { table, guests: [], confirmed: 0, pending: 0 });
   }
 
-  return [...rows.values()].sort((a, b) => {
-    if (!a.key !== !b.key) return a.key ? -1 : 1; // "Sin grupo" always last
-    const orderA = order.get(a.key) ?? Number.MAX_SAFE_INTEGER;
-    const orderB = order.get(b.key) ?? Number.MAX_SAFE_INTEGER;
-    return orderA - orderB || a.label.localeCompare(b.label);
-  });
+  const unseated: Guest[] = [];
+  let unseatedPeople = 0;
+
+  for (const guest of guests) {
+    if (guest.response === "decline") continue;
+    const people =
+      guest.response === "accept"
+        ? guest.adultsConfirmed + guest.kidsConfirmed
+        : guest.adultSlots + guest.kidSlots;
+    const seat = byTable.get(Number(guest.table));
+    if (!guest.table || !seat) {
+      unseated.push(guest);
+      unseatedPeople += people;
+      continue;
+    }
+    seat.guests.push(guest);
+    if (guest.response === "accept") seat.confirmed += people;
+    else seat.pending += people;
+  }
+
+  return { tables: [...byTable.values()], unseated, unseatedPeople };
 }
 
-function SeatingSection({ guests }: { guests: Guest[] }) {
-  const rows = useMemo(() => buildGroupBreakdown(guests), [guests]);
-  const totals = rows.reduce(
-    (acc, row) => ({
-      invited: acc.invited + row.invited,
-      confirmed: acc.confirmed + row.confirmed,
-      pending: acc.pending + row.pending,
-      declined: acc.declined + row.declined,
-    }),
-    { invited: 0, confirmed: 0, pending: 0, declined: 0 },
-  );
-  const worstCase = totals.confirmed + totals.pending;
-  const seatsLeft = TOTAL_SEATS - totals.confirmed;
+function TablesTab({ guests }: { guests: Guest[] }) {
+  const { tables, unseated, unseatedPeople } = useMemo(() => buildOccupancy(guests), [guests]);
+  const seated = tables.reduce((sum, entry) => sum + entry.confirmed + entry.pending, 0);
+  const byNumber = new Map(tables.map((entry) => [entry.table.number, entry]));
 
   return (
-    <section className="mt-12">
-      <header className="flex items-baseline justify-between mb-4">
-        <h2 className="font-display italic text-2xl m-0">Mesas y grupos</h2>
-        <span className="text-sm text-muted tabular-nums">
-          {totals.confirmed} de {TOTAL_SEATS} lugares
+    <section>
+      <div className="flex flex-wrap gap-3 items-baseline mb-6 text-sm">
+        <span className="text-muted tabular-nums">
+          {seated} de {TOTAL_SEATS} lugares ocupados
         </span>
-      </header>
-
-      <div className="bg-white border border-bone rounded-lg shadow-sm p-6 mb-4">
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-4">
-          <span className="text-[0.78rem] uppercase tracking-[0.16em] text-muted font-medium">
-            {TOTAL_TABLES} mesas · {TOTAL_SEATS} lugares
-          </span>
-          <span className="text-sm text-subtle">
-            {VENUE_TABLES.map((spec) => `${spec.count} de ${spec.seats}`).join(" · ")}
-          </span>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {listTables().map((table) => (
-            <span
-              key={table.number}
-              className="inline-flex items-baseline gap-2 rounded-full border border-bone bg-cream/50 px-4 py-1.5 text-sm"
-            >
-              <span className="text-muted">Mesa {table.number}</span>
-              <span className="font-medium text-ink tabular-nums">{table.seats}</span>
+        <span className="text-subtle">·</span>
+        <span className="text-muted tabular-nums">{TOTAL_TABLES} mesas</span>
+        {unseatedPeople > 0 && (
+          <>
+            <span className="text-subtle">·</span>
+            <span className="text-danger tabular-nums">
+              {unseatedPeople} personas sin mesa ({unseated.length} invitaciones)
             </span>
-          ))}
-        </div>
-        <p className="text-sm text-muted mt-4">
-          {seatsLeft >= 0
-            ? `Quedan ${seatsLeft} lugares libres.`
-            : `Te faltan ${Math.abs(seatsLeft)} lugares.`}{" "}
-          {totals.pending > 0 &&
-            (worstCase > TOTAL_SEATS
-              ? `Si contestan que sí los ${totals.pending} pendientes, te pasás por ${worstCase - TOTAL_SEATS}.`
-              : `Si vienen todos los ${totals.pending} pendientes, entran igual.`)}
-        </p>
+          </>
+        )}
       </div>
 
-      <div className="bg-white border border-bone rounded-lg overflow-hidden shadow-sm overflow-x-auto">
-        <table className="w-full border-collapse text-sm">
-          <thead>
-            <tr className="bg-cream">
-              <Th>Grupo</Th>
-              <Th>Invitados</Th>
-              <Th>Confirmados</Th>
-              <Th>Pendientes</Th>
-              <Th>No vienen</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={5} className="text-center text-subtle italic py-10 px-4">
-                  Todavía no hay invitados para repartir.
-                </td>
-              </tr>
-            )}
-            {rows.map((row) => (
-              <tr key={row.key || "none"} className="border-t border-bone">
-                <Td>
-                  <span className={row.key ? "text-ink" : "text-subtle italic"}>{row.label}</span>
-                </Td>
-                <Td>
-                  <span className="tabular-nums text-ink">{row.invited}</span>
-                </Td>
-                <Td>
-                  <span className="tabular-nums font-medium text-success">{row.confirmed}</span>
-                </Td>
-                <Td>
-                  <span className="tabular-nums text-muted">{row.pending}</span>
-                </Td>
-                <Td>
-                  <span className="tabular-nums text-subtle">{row.declined}</span>
-                </Td>
-              </tr>
+      {tablesByZone().map((zone) => (
+        <div key={zone.zone} className="mb-8">
+          <h3 className="text-[0.78rem] uppercase tracking-[0.22em] text-muted font-medium mb-3">
+            {zone.zone} · {zone.tables.reduce((sum, table) => sum + table.seats, 0)} lugares
+          </h3>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {zone.tables.map((table) => {
+              const entry = byNumber.get(table.number)!;
+              const taken = entry.confirmed + entry.pending;
+              const free = table.seats - taken;
+              return (
+                <div
+                  key={table.number}
+                  className={`bg-white border rounded-lg shadow-sm p-5 ${
+                    free < 0 ? "border-danger-border" : "border-bone"
+                  }`}
+                >
+                  <div className="flex items-baseline justify-between mb-1">
+                    <span className="font-medium text-ink">Mesa {table.number}</span>
+                    <span className="text-sm text-muted tabular-nums">
+                      {taken} / {table.seats}
+                    </span>
+                  </div>
+                  <div className="text-[0.78rem] mb-3">
+                    {free > 0 && <span className="text-muted">{free} lugares libres</span>}
+                    {free === 0 && <span className="text-success">completa</span>}
+                    {free < 0 && (
+                      <span className="text-danger">{Math.abs(free)} personas de más</span>
+                    )}
+                    {entry.pending > 0 && (
+                      <span className="text-subtle"> · {entry.pending} sin confirmar</span>
+                    )}
+                  </div>
+                  {entry.guests.length === 0 ? (
+                    <p className="text-sm text-subtle italic">Vacía</p>
+                  ) : (
+                    <ul className="flex flex-col gap-1 text-sm">
+                      {entry.guests.map((guest) => {
+                        const people =
+                          guest.response === "accept"
+                            ? guest.adultsConfirmed + guest.kidsConfirmed
+                            : guest.adultSlots + guest.kidSlots;
+                        return (
+                          <li key={guest.id} className="flex items-baseline justify-between gap-3">
+                            <span className={guest.response === "accept" ? "text-ink" : "text-muted"}>
+                              {guest.name}
+                            </span>
+                            <span className="tabular-nums text-subtle shrink-0">
+                              {people}
+                              {guest.response !== "accept" && "?"}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+
+      <div className="bg-white border border-bone rounded-lg shadow-sm p-5">
+        <h3 className="text-[0.78rem] uppercase tracking-[0.22em] text-muted font-medium mb-3">
+          Sin mesa · {unseatedPeople} personas
+        </h3>
+        {unseated.length === 0 ? (
+          <p className="text-sm text-subtle italic">No queda nadie por sentar.</p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {unseated.map((guest) => (
+              <span
+                key={guest.id}
+                className="inline-flex items-baseline gap-2 rounded-full border border-bone bg-cream/50 px-3 py-1 text-sm"
+              >
+                <span className={guest.response === "accept" ? "text-ink" : "text-muted"}>
+                  {guest.name}
+                </span>
+                <span className="tabular-nums text-subtle">
+                  {guest.response === "accept"
+                    ? guest.adultsConfirmed + guest.kidsConfirmed
+                    : `${guest.adultSlots + guest.kidSlots}?`}
+                </span>
+              </span>
             ))}
-            {rows.length > 0 && (
-              <tr className="border-t border-bone bg-cream/60 font-medium">
-                <Td>Total</Td>
-                <Td>
-                  <span className="tabular-nums">{totals.invited}</span>
-                </Td>
-                <Td>
-                  <span className="tabular-nums text-success">{totals.confirmed}</span>
-                </Td>
-                <Td>
-                  <span className="tabular-nums">{totals.pending}</span>
-                </Td>
-                <Td>
-                  <span className="tabular-nums">{totals.declined}</span>
-                </Td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+          </div>
+        )}
       </div>
     </section>
   );
 }
+
 
 function SongRecommendationsSection({
   recommendations,
@@ -1026,7 +1050,7 @@ function SongRecommendationsSection({
   }, [recommendations]);
 
   return (
-    <section className="mt-12">
+    <section>
       <header className="flex items-baseline justify-between mb-4">
         <h2 className="font-display italic text-2xl m-0">Canciones recomendadas</h2>
         <span className="text-sm text-muted tabular-nums">{sorted.length}</span>

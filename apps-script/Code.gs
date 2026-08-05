@@ -57,7 +57,7 @@ var GUESTS_HEADERS = [
   'contact',
   'notes',
   'side',
-  'group',
+  'table',
 ];
 
 /** @const {Array<string>} */
@@ -88,7 +88,7 @@ var ADMIN_PASSPHRASE_KEY = 'ADMIN_PASSPHRASE';
  * deployment" mints a second URL instead of updating the one the app calls.
  * @const {string}
  */
-var CODE_VERSION = '2026-08-04.1';
+var CODE_VERSION = '2026-08-04.2';
 
 // ---------- Public bootstrap ----------
 
@@ -98,11 +98,30 @@ var CODE_VERSION = '2026-08-04.1';
  */
 function setup() {
   migrateGuestsFromPlusOnes_();
+  migrateGroupColumnToTable_();
   ensureSheetWithHeaders_(GUESTS_TAB, GUESTS_HEADERS);
   migrateRsvpHistoryIntoGuests_();
   dropLegacyRsvpsSheet_();
   ensureTextColumns_();
   ensureSheetWithHeaders_(SONG_RECS_TAB, SONG_RECS_HEADERS);
+}
+
+/**
+ * Guests used to be tagged with a free-text group name; they are now seated at
+ * a numbered table, in the same column. Renaming the header alone would leave
+ * group names like "Amigos 2inn" sitting in a column that now means a table
+ * number, so the old values are cleared. Idempotent: once the header reads
+ * `table`, this is a no-op.
+ */
+function migrateGroupColumnToTable_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(GUESTS_TAB);
+  if (!sheet) return;
+  var column = GUESTS_HEADERS.length; // `table` is the last column
+  if (sheet.getLastColumn() < column) return;
+  if (sheet.getRange(1, column).getValue() !== 'group') return;
+  var lastRow = sheet.getLastRow();
+  if (lastRow >= 2) sheet.getRange(2, column, lastRow - 1, 1).clearContent();
+  sheet.getRange(1, column).setValue('table');
 }
 
 /**
@@ -118,7 +137,7 @@ function dropLegacyRsvpsSheet_() {
 }
 
 /**
- * Columns holding free text (name, comment, contact, notes, group) are forced
+ * Columns holding free text (name, comment, contact, notes, table) are forced
  * to the plain-text number format. Otherwise Sheets parses a value starting
  * with "+" or "=" — a phone like "+598 99 123 456", or a comment like "+1
  * amigo" — as a formula and the cell renders "Error de análisis de fórmula"
@@ -509,7 +528,7 @@ function handleSubmitRsvp_(params) {
       guest.contact,
       guest.notes,
       guest.side,
-      guest.group,
+      guest.table,
     ];
     sheet.getRange(guest.rowIndex, 1, 1, row.length).setValues([row]);
     return { ok: true };
@@ -596,9 +615,9 @@ function handleUpsertGuest_(params) {
   if (side !== 'vale' && side !== 'juan') side = '';
   var contact = input.contact == null ? '' : String(input.contact);
   var notes = input.notes == null ? '' : String(input.notes);
-  // Free text on purpose: the group list lives in the frontend, and a value
+  // Free text on purpose: the table list lives in the frontend, and a value
   // typed straight into the sheet should survive an edit from the admin.
-  var group = input.group == null ? '' : String(input.group).trim();
+  var table = input.table == null ? '' : String(input.table).trim();
 
   return withWriteLock_(function () {
     var sheet = sheetByName_(GUESTS_TAB);
@@ -619,7 +638,7 @@ function handleUpsertGuest_(params) {
       contact,
       notes,
       side,
-      group,
+      table,
     ];
     if (existing) {
       sheet.getRange(existing.rowIndex, 1, 1, row.length).setValues([row]);
@@ -722,7 +741,7 @@ function ensureSheetWithHeaders_(name, headers) {
  *           kidSlots: number, invitationSent: boolean, response: string,
  *           adultsConfirmed: number, kidsConfirmed: number, comment: string,
  *           rsvpTimestamp: string, contact: string, notes: string,
- *           side: string, group: string}} Guest
+ *           side: string, table: string}} Guest
  */
 
 /**
@@ -795,7 +814,7 @@ function mapGuestRow_(row, rowIndex) {
     contact: String(row[10] || ''),
     notes: String(row[11] || ''),
     side: String(row[12] || ''),
-    group: String(row[13] || ''),
+    table: String(row[13] || ''),
   };
 }
 

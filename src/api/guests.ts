@@ -5,8 +5,8 @@ export type Guest = {
   id: string;
   name: string;
   side: "vale" | "juan" | "";
-  /** Name of one of GUEST_GROUPS, or "" when unassigned. */
-  group: string;
+  /** Table number as text (see VENUE_TABLES), or "" when unseated. */
+  table: string;
   adultSlots: number;
   kidSlots: number;
   invitationSent: boolean;
@@ -47,7 +47,7 @@ export type GuestInput = {
   id?: string;
   name: string;
   side: "vale" | "juan" | "";
-  group: string;
+  table: string;
   adultSlots: number;
   kidSlots: number;
   invitationSent: boolean;
