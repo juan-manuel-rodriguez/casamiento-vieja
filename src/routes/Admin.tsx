@@ -298,12 +298,12 @@ export function AdminPage() {
   return (
     // Wider than the guest page on purpose: this is a data table, and 6xl was
     // squeezing it into a horizontal scroll on a laptop screen.
-    <main className="max-w-400 mx-auto px-6 py-8 pb-24 font-sans">
+    <main className="max-w-400 mx-auto px-4 sm:px-6 py-8 pb-24 font-sans">
       {busy && <BusyOverlay />}
       <Topbar onRefresh={() => void withBusy(() => refresh())} onSignOut={handleSignOut} />
       <Stats guests={guests} />
 
-      <div className="flex gap-6 border-b border-bone mb-8">
+      <div className="flex gap-5 sm:gap-6 border-b border-bone mb-8 overflow-x-auto">
         {TABS.map((entry) => (
           <button
             key={entry.id}
@@ -421,7 +421,7 @@ export function AdminPage() {
 
       <div className="flex flex-wrap gap-3 items-center mb-3">
         <input
-          className="flex-1 min-w-[200px] px-4 py-3 border border-bone rounded bg-white focus:outline-none focus:border-gold"
+          className="w-full sm:flex-1 sm:w-auto sm:min-w-52 px-4 py-3 border border-bone rounded bg-white focus:outline-none focus:border-gold"
           placeholder="Buscar por nombre o id…"
           value={filters.search}
           onChange={(e) => setFilters({ ...filters, search: e.target.value })}
@@ -689,7 +689,7 @@ function FilterSelect<T extends string>({
 }) {
   return (
     <select
-      className="px-4 py-3 border border-bone rounded bg-white focus:outline-none focus:border-gold cursor-pointer"
+      className="flex-1 min-w-36 sm:flex-none px-4 py-3 border border-bone rounded bg-white focus:outline-none focus:border-gold cursor-pointer"
       aria-label={label}
       value={value}
       onChange={(e) => onChange(e.target.value as T)}
@@ -715,6 +715,101 @@ type TableProps = {
   onDelete: (guest: Guest) => void;
 };
 
+/** Table picker, shared by the desktop row and the mobile card. */
+function TablePicker({
+  guest,
+  onChange,
+  className = "",
+}: {
+  guest: Guest;
+  onChange: (guest: Guest, table: string) => void;
+  className?: string;
+}) {
+  return (
+    <select
+      className={`px-2 py-1.5 border border-bone rounded bg-white text-sm text-ink cursor-pointer hover:border-sand focus:outline-none focus:border-gold ${className}`}
+      value={guest.table || ""}
+      aria-label={`Mesa de ${guest.name}`}
+      onChange={(e) => onChange(guest, e.target.value)}
+    >
+      <option value="">Sin mesa</option>
+      {VENUE_TABLES.map((table) => (
+        <option key={table.number} value={String(table.number)}>
+          Mesa {table.number} · {table.seats}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function SentCheckbox({ guest, onToggle }: { guest: Guest; onToggle: (guest: Guest) => void }) {
+  return (
+    <input
+      type="checkbox"
+      className="admin-checkbox"
+      checked={guest.invitationSent}
+      onChange={() => onToggle(guest)}
+      aria-label={`Invitación enviada a ${guest.name}`}
+      title={guest.invitationSent ? "Invitación enviada" : "Invitación sin enviar"}
+    />
+  );
+}
+
+function GuestActions({
+  guest,
+  onCopyLink,
+  onSendWhatsApp,
+  onDelete,
+}: {
+  guest: Guest;
+  onCopyLink: (id: string) => void;
+  onSendWhatsApp: (guest: Guest) => void;
+  onDelete: (guest: Guest) => void;
+}) {
+  return (
+    <div className="flex gap-1.5">
+      <button
+        className="icon-action icon-action--brand"
+        onClick={() => onSendWhatsApp(guest)}
+        title="Enviar por WhatsApp"
+        aria-label={`Enviar invitación por WhatsApp a ${guest.name}`}
+      >
+        <FaWhatsapp size={17} aria-hidden="true" />
+      </button>
+      <button
+        className="icon-action"
+        onClick={() => onCopyLink(guest.id)}
+        title="Copiar link"
+        aria-label={`Copiar link de ${guest.name}`}
+      >
+        <LuLink size={16} aria-hidden="true" />
+      </button>
+      <button
+        className="icon-action icon-action--danger"
+        onClick={() => onDelete(guest)}
+        title="Eliminar"
+        aria-label={`Eliminar a ${guest.name}`}
+      >
+        <LuTrash2 size={16} aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
+
+function GuestSlots({ guest }: { guest: Guest }) {
+  return (
+    <>
+      <SlotsCell adults={guest.adultSlots} kids={guest.kidSlots} />
+      {guest.response === "accept" && (
+        <div className="text-[0.78rem] text-success tabular-nums">
+          vienen {guest.adultsConfirmed}A
+          {guest.kidsConfirmed > 0 && ` · ${guest.kidsConfirmed}N`}
+        </div>
+      )}
+    </>
+  );
+}
+
 function GuestTable({
   guests,
   totalGuests,
@@ -724,31 +819,83 @@ function GuestTable({
   onSendWhatsApp,
   onDelete,
 }: TableProps) {
+  const emptyMessage =
+    totalGuests === 0
+      ? "Todavía no hay invitados. Agregá el primero arriba."
+      : "Ningún invitado coincide con los filtros.";
+
   return (
-    <div className="bg-white border border-bone rounded-lg overflow-hidden shadow-sm overflow-x-auto">
-      <table className="w-full border-collapse text-sm">
-        <thead>
-          <tr className="bg-cream">
-            <Th>Invitado</Th>
-            <Th>Mesa</Th>
-            <Th>Cupos</Th>
-            <Th>Estado</Th>
-            <Th>Comentario</Th>
-            <Th aria-label="Acciones"></Th>
-          </tr>
-        </thead>
-        <tbody>
-          {guests.length === 0 && (
-            <tr>
-              <td colSpan={6} className="text-center text-subtle italic py-12 px-4">
-                {totalGuests === 0
-                  ? "Todavía no hay invitados. Agregá el primero arriba."
-                  : "Ningún invitado coincide con los filtros."}
-              </td>
+    <>
+      {/* Phones get cards: six columns of table never fit, and a sideways
+          scroll on a list you scan every day is miserable. */}
+      <div className="flex flex-col gap-3 md:hidden">
+        {guests.length === 0 && (
+          <p className="bg-white border border-bone rounded-lg shadow-sm text-center text-subtle italic py-10 px-4 m-0">
+            {emptyMessage}
+          </p>
+        )}
+        {guests.map((guest) => (
+          <article key={guest.id} className="bg-white border border-bone rounded-lg shadow-sm p-4">
+            <header className="flex items-start justify-between gap-3 mb-3">
+              <div className="min-w-0">
+                <div className="font-medium text-ink">{guest.name}</div>
+                <div className="text-[0.78rem] text-subtle">
+                  {guestSideLabel(guest.side)}
+                  <span className="mx-1.5 text-bone">|</span>
+                  <span className="font-mono" title={guest.id}>
+                    {guest.id.slice(0, 8)}
+                  </span>
+                </div>
+              </div>
+              <ResponsePill response={guest.response} />
+            </header>
+
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-3 text-sm">
+              <div>
+                <GuestSlots guest={guest} />
+              </div>
+              <label className="flex items-center gap-2 text-muted cursor-pointer">
+                <SentCheckbox guest={guest} onToggle={onToggleInvitation} />
+                Enviada
+              </label>
+              <TablePicker guest={guest} onChange={onChangeTable} className="w-36" />
+            </div>
+
+            {guest.comment && <p className="text-sm text-muted mt-3 mb-0">{guest.comment}</p>}
+
+            <footer className="flex justify-end mt-4">
+              <GuestActions
+                guest={guest}
+                onCopyLink={onCopyLink}
+                onSendWhatsApp={onSendWhatsApp}
+                onDelete={onDelete}
+              />
+            </footer>
+          </article>
+        ))}
+      </div>
+
+      <div className="hidden md:block bg-white border border-bone rounded-lg overflow-hidden shadow-sm overflow-x-auto">
+        <table className="w-full border-collapse text-sm">
+          <thead>
+            <tr className="bg-cream">
+              <Th>Invitado</Th>
+              <Th>Mesa</Th>
+              <Th>Cupos</Th>
+              <Th>Estado</Th>
+              <Th>Comentario</Th>
+              <Th aria-label="Acciones"></Th>
             </tr>
-          )}
-          {guests.map((guest) => {
-            return (
+          </thead>
+          <tbody>
+            {guests.length === 0 && (
+              <tr>
+                <td colSpan={6} className="text-center text-subtle italic py-12 px-4">
+                  {emptyMessage}
+                </td>
+              </tr>
+            )}
+            {guests.map((guest) => (
               <tr key={guest.id} className="border-t border-bone hover:bg-soft/30 transition-colors">
                 <Td>
                   <div className="font-medium text-ink">{guest.name}</div>
@@ -765,82 +912,40 @@ function GuestTable({
                   </div>
                 </Td>
                 <Td>
-                  <select
-                    className="w-36 px-2 py-1.5 border border-bone rounded bg-white text-sm text-ink cursor-pointer hover:border-sand focus:outline-none focus:border-gold"
-                    value={guest.table || ""}
-                    aria-label={`Mesa de ${guest.name}`}
-                    onChange={(e) => onChangeTable(guest, e.target.value)}
-                  >
-                    <option value="">Sin mesa</option>
-                    {VENUE_TABLES.map((table) => (
-                      <option key={table.number} value={String(table.number)}>
-                        Mesa {table.number} · {table.seats}
-                      </option>
-                    ))}
-                  </select>
+                  <TablePicker guest={guest} onChange={onChangeTable} className="w-36" />
                 </Td>
                 {/* Invited vs confirmed in one column: the second number only
                     means anything next to the first one. */}
                 <Td>
-                  <SlotsCell adults={guest.adultSlots} kids={guest.kidSlots} />
-                  {guest.response === "accept" && (
-                    <div className="text-[0.78rem] text-success tabular-nums">
-                      vienen {guest.adultsConfirmed}A
-                      {guest.kidsConfirmed > 0 && ` · ${guest.kidsConfirmed}N`}
-                    </div>
-                  )}
+                  <GuestSlots guest={guest} />
                 </Td>
                 {/* Sent + answered is a single workflow state, so one column. */}
                 <Td>
                   <div className="flex items-center gap-2.5">
-                    <input
-                      type="checkbox"
-                      className="admin-checkbox"
-                      checked={guest.invitationSent}
-                      onChange={() => onToggleInvitation(guest)}
-                      aria-label={`Invitación enviada a ${guest.name}`}
-                      title={guest.invitationSent ? "Invitación enviada" : "Invitación sin enviar"}
-                    />
+                    <SentCheckbox guest={guest} onToggle={onToggleInvitation} />
                     <ResponsePill response={guest.response} />
                   </div>
                 </Td>
                 <Td wrap>{guest.comment ?? ""}</Td>
                 <Td>
-                  <div className="flex gap-1.5 justify-end">
-                    <button
-                      className="icon-action icon-action--brand"
-                      onClick={() => onSendWhatsApp(guest)}
-                      title="Enviar por WhatsApp"
-                      aria-label={`Enviar invitación por WhatsApp a ${guest.name}`}
-                    >
-                      <FaWhatsapp size={17} aria-hidden="true" />
-                    </button>
-                    <button
-                      className="icon-action"
-                      onClick={() => onCopyLink(guest.id)}
-                      title="Copiar link"
-                      aria-label={`Copiar link de ${guest.name}`}
-                    >
-                      <LuLink size={16} aria-hidden="true" />
-                    </button>
-                    <button
-                      className="icon-action icon-action--danger"
-                      onClick={() => onDelete(guest)}
-                      title="Eliminar"
-                      aria-label={`Eliminar a ${guest.name}`}
-                    >
-                      <LuTrash2 size={16} aria-hidden="true" />
-                    </button>
+                  <div className="flex justify-end">
+                    <GuestActions
+                      guest={guest}
+                      onCopyLink={onCopyLink}
+                      onSendWhatsApp={onSendWhatsApp}
+                      onDelete={onDelete}
+                    />
                   </div>
                 </Td>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
+
 
 function guestSideLabel(side: Guest["side"]) {
   if (side === "vale") return "Vale";
@@ -1018,7 +1123,7 @@ function FloorPlan({
     <div className="bg-white border border-bone rounded-lg shadow-sm p-4 lg:sticky lg:top-4">
       <svg
         viewBox={`-16 -16 ${PLAN_VIEWBOX.width + 32} ${PLAN_VIEWBOX.height + 32}`}
-        className="w-full h-auto max-h-[70vh]"
+        className="w-full h-auto max-h-[60vh] lg:max-h-[75vh]"
         role="img"
         aria-label="Plano de mesas"
       >
