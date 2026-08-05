@@ -50,3 +50,66 @@ export function tableLabel(value: string): string {
   const table = findTable(value);
   return table ? `Mesa ${table.number} · ${table.seats}` : value;
 }
+
+/**
+ * Where each table sits on the floor plan, in the SVG coordinate space below.
+ * Taken from the venue's plan: two rows of rectangular tables up top, the two
+ * long ones in the middle, and the four eights stacked along the right.
+ */
+export const PLAN_VIEWBOX = { width: 300, height: 800 };
+
+export type TablePlacement = {
+  number: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export const TABLE_PLACEMENTS: TablePlacement[] = [
+  { number: 1, x: 40, y: 30, width: 86, height: 36 },
+  { number: 2, x: 178, y: 76, width: 86, height: 36 },
+  { number: 3, x: 100, y: 170, width: 36, height: 104 },
+  { number: 4, x: 44, y: 330, width: 36, height: 104 },
+  { number: 5, x: 158, y: 320, width: 36, height: 124 },
+  { number: 6, x: 170, y: 500, width: 86, height: 36 },
+  { number: 7, x: 170, y: 578, width: 86, height: 36 },
+  { number: 8, x: 170, y: 656, width: 86, height: 36 },
+  { number: 9, x: 170, y: 734, width: 86, height: 36 },
+];
+
+/**
+ * Chairs around a table, drawn the way the plan does it: the long sides carry
+ * (seats - 2) / 2 chairs each and one sits at either end. Every table here has
+ * an even seat count of 8, 10 or 12, so that divides cleanly.
+ */
+export function seatPositions(placement: TablePlacement, seats: number): Array<{ x: number; y: number }> {
+  const gap = 11;
+  const horizontal = placement.width > placement.height;
+  const perSide = (seats - 2) / 2;
+  const positions: Array<{ x: number; y: number }> = [];
+
+  const along = horizontal ? placement.width : placement.height;
+  for (let i = 0; i < perSide; i++) {
+    const offset = (along * (i + 1)) / (perSide + 1);
+    if (horizontal) {
+      positions.push({ x: placement.x + offset, y: placement.y - gap });
+      positions.push({ x: placement.x + offset, y: placement.y + placement.height + gap });
+    } else {
+      positions.push({ x: placement.x - gap, y: placement.y + offset });
+      positions.push({ x: placement.x + placement.width + gap, y: placement.y + offset });
+    }
+  }
+
+  const midX = placement.x + placement.width / 2;
+  const midY = placement.y + placement.height / 2;
+  if (horizontal) {
+    positions.push({ x: placement.x - gap, y: midY });
+    positions.push({ x: placement.x + placement.width + gap, y: midY });
+  } else {
+    positions.push({ x: midX, y: placement.y - gap });
+    positions.push({ x: midX, y: placement.y + placement.height + gap });
+  }
+
+  return positions;
+}

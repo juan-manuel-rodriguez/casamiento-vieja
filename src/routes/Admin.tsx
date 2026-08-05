@@ -16,11 +16,13 @@ import {
 import { clearPassphrase, loadPassphrase, savePassphrase } from "../auth/passphrase";
 import { firstName } from "../lib/names";
 import {
+  PLAN_VIEWBOX,
+  TABLE_PLACEMENTS,
   TOTAL_SEATS,
   TOTAL_TABLES,
   VENUE_TABLES,
   type VenueTable,
-  tablesByZone,
+  seatPositions,
 } from "../lib/tables";
 
 type ViewState =
@@ -499,7 +501,7 @@ export function AdminPage() {
         </>
       )}
 
-      {tab === "tables" && <TablesTab guests={guests} />}
+      {tab === "tables" && <TablesTab guests={guests} onChangeTable={changeTable} />}
 
       {tab === "songs" && (
         <SongRecommendationsSection recommendations={songRecommendations} guests={guests} />
@@ -915,10 +917,18 @@ function buildOccupancy(guests: Guest[]): {
   return { tables: [...byTable.values()], unseated, unseatedPeople };
 }
 
-function TablesTab({ guests }: { guests: Guest[] }) {
+function TablesTab({
+  guests,
+  onChangeTable,
+}: {
+  guests: Guest[];
+  onChangeTable: (guest: Guest, table: string) => void;
+}) {
+  const [selected, setSelected] = useState<number | null>(null);
   const { tables, unseated, unseatedPeople } = useMemo(() => buildOccupancy(guests), [guests]);
-  const seated = tables.reduce((sum, entry) => sum + entry.confirmed + entry.pending, 0);
   const byNumber = new Map(tables.map((entry) => [entry.table.number, entry]));
+  const seated = tables.reduce((sum, entry) => sum + entry.confirmed + entry.pending, 0);
+  const current = selected == null ? null : (byNumber.get(selected) ?? null);
 
   return (
     <section>
@@ -931,106 +941,258 @@ function TablesTab({ guests }: { guests: Guest[] }) {
         {unseatedPeople > 0 && (
           <>
             <span className="text-subtle">·</span>
-            <span className="text-danger tabular-nums">
-              {unseatedPeople} personas sin mesa ({unseated.length} invitaciones)
-            </span>
+            <span className="text-danger tabular-nums">{unseatedPeople} personas sin mesa</span>
           </>
         )}
       </div>
 
-      {tablesByZone().map((zone) => (
-        <div key={zone.zone} className="mb-8">
-          <h3 className="text-[0.78rem] uppercase tracking-[0.22em] text-muted font-medium mb-3">
-            {zone.zone} · {zone.tables.reduce((sum, table) => sum + table.seats, 0)} lugares
-          </h3>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {zone.tables.map((table) => {
-              const entry = byNumber.get(table.number)!;
-              const taken = entry.confirmed + entry.pending;
-              const free = table.seats - taken;
-              return (
-                <div
-                  key={table.number}
-                  className={`bg-white border rounded-lg shadow-sm p-5 ${
-                    free < 0 ? "border-danger-border" : "border-bone"
-                  }`}
-                >
-                  <div className="flex items-baseline justify-between mb-1">
-                    <span className="font-medium text-ink">Mesa {table.number}</span>
-                    <span className="text-sm text-muted tabular-nums">
-                      {taken} / {table.seats}
-                    </span>
-                  </div>
-                  <div className="text-[0.78rem] mb-3">
-                    {free > 0 && <span className="text-muted">{free} lugares libres</span>}
-                    {free === 0 && <span className="text-success">completa</span>}
-                    {free < 0 && (
-                      <span className="text-danger">{Math.abs(free)} personas de más</span>
-                    )}
-                    {entry.pending > 0 && (
-                      <span className="text-subtle"> · {entry.pending} sin confirmar</span>
-                    )}
-                  </div>
-                  {entry.guests.length === 0 ? (
-                    <p className="text-sm text-subtle italic">Vacía</p>
-                  ) : (
-                    <ul className="flex flex-col gap-1 text-sm">
-                      {entry.guests.map((guest) => {
-                        const people =
-                          guest.response === "accept"
-                            ? guest.adultsConfirmed + guest.kidsConfirmed
-                            : guest.adultSlots + guest.kidSlots;
-                        return (
-                          <li key={guest.id} className="flex items-baseline justify-between gap-3">
-                            <span className={guest.response === "accept" ? "text-ink" : "text-muted"}>
-                              {guest.name}
-                            </span>
-                            <span className="tabular-nums text-subtle shrink-0">
-                              {people}
-                              {guest.response !== "accept" && "?"}
-                            </span>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                </div>
-              );
-            })}
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] items-start">
+        <FloorPlan
+          tables={tables}
+          selected={selected}
+          onSelect={(number) => setSelected((prev) => (prev === number ? null : number))}
+        />
+
+        <div className="flex flex-col gap-4">
+          {current ? (
+            <TableDetail
+              occupancy={current}
+              unseated={unseated}
+              onUnseat={(guest) => onChangeTable(guest, "")}
+              onClose={() => setSelected(null)}
+            />
+          ) : (
+            <div className="bg-white border border-bone rounded-lg shadow-sm p-6">
+              <p className="text-muted text-sm m-0">
+                Tocá una mesa en el plano para ver quién está sentado ahí y sentar gente.
+              </p>
+            </div>
+          )}
+
+          <div className="bg-white border border-bone rounded-lg shadow-sm p-5">
+            <h3 className="text-[0.78rem] uppercase tracking-[0.22em] text-muted font-medium mb-3">
+              Sin mesa · {unseatedPeople} personas
+            </h3>
+            {unseated.length === 0 ? (
+              <p className="text-sm text-subtle italic m-0">No queda nadie por sentar.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {unseated.map((guest) => (
+                  <GuestChip
+                    key={guest.id}
+                    guest={guest}
+                    action={current ? `Sentar en la mesa ${current.table.number}` : undefined}
+                    onClick={
+                      current ? () => onChangeTable(guest, String(current.table.number)) : undefined
+                    }
+                  />
+                ))}
+              </div>
+            )}
           </div>
         </div>
-      ))}
-
-      <div className="bg-white border border-bone rounded-lg shadow-sm p-5">
-        <h3 className="text-[0.78rem] uppercase tracking-[0.22em] text-muted font-medium mb-3">
-          Sin mesa · {unseatedPeople} personas
-        </h3>
-        {unseated.length === 0 ? (
-          <p className="text-sm text-subtle italic">No queda nadie por sentar.</p>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {unseated.map((guest) => (
-              <span
-                key={guest.id}
-                className="inline-flex items-baseline gap-2 rounded-full border border-bone bg-cream/50 px-3 py-1 text-sm"
-              >
-                <span className={guest.response === "accept" ? "text-ink" : "text-muted"}>
-                  {guest.name}
-                </span>
-                <span className="tabular-nums text-subtle">
-                  {guest.response === "accept"
-                    ? guest.adultsConfirmed + guest.kidsConfirmed
-                    : `${guest.adultSlots + guest.kidSlots}?`}
-                </span>
-              </span>
-            ))}
-          </div>
-        )}
       </div>
     </section>
   );
 }
 
+/** People a guest brings: what they confirmed, or their full slots if silent. */
+function guestHeadcount(guest: Guest): number {
+  return guest.response === "accept"
+    ? guest.adultsConfirmed + guest.kidsConfirmed
+    : guest.adultSlots + guest.kidSlots;
+}
+
+function FloorPlan({
+  tables,
+  selected,
+  onSelect,
+}: {
+  tables: TableOccupancy[];
+  selected: number | null;
+  onSelect: (number: number) => void;
+}) {
+  const byNumber = new Map(tables.map((entry) => [entry.table.number, entry]));
+
+  return (
+    <div className="bg-white border border-bone rounded-lg shadow-sm p-4 lg:sticky lg:top-4">
+      <svg
+        viewBox={`-16 -16 ${PLAN_VIEWBOX.width + 32} ${PLAN_VIEWBOX.height + 32}`}
+        className="w-full h-auto max-h-[70vh]"
+        role="img"
+        aria-label="Plano de mesas"
+      >
+        {TABLE_PLACEMENTS.map((placement) => {
+          const entry = byNumber.get(placement.number);
+          if (!entry) return null;
+          const taken = entry.confirmed + entry.pending;
+          const seats = entry.table.seats;
+          const isSelected = selected === placement.number;
+          const tone =
+            taken > seats
+              ? { fill: "fill-danger-soft", stroke: "stroke-danger-border", seat: "fill-danger" }
+              : taken === seats
+                ? { fill: "fill-success-soft", stroke: "stroke-success-border", seat: "fill-success" }
+                : taken > 0
+                  ? { fill: "fill-soft", stroke: "stroke-sand", seat: "fill-gold-dark" }
+                  : { fill: "fill-cream", stroke: "stroke-bone", seat: "fill-transparent" };
+
+          return (
+            <g
+              key={placement.number}
+              onClick={() => onSelect(placement.number)}
+              className="cursor-pointer"
+              role="button"
+              aria-label={`Mesa ${placement.number}, ${taken} de ${seats} lugares`}
+            >
+              <title>{`Mesa ${placement.number} · ${taken}/${seats}`}</title>
+              {seatPositions(placement, seats).map((seat, index) => (
+                <circle
+                  key={index}
+                  cx={seat.x}
+                  cy={seat.y}
+                  r={7}
+                  className={`${index < taken ? tone.seat : "fill-white"} stroke-bone`}
+                  strokeWidth={1}
+                />
+              ))}
+              <rect
+                x={placement.x}
+                y={placement.y}
+                width={placement.width}
+                height={placement.height}
+                rx={6}
+                className={`${tone.fill} ${isSelected ? "stroke-ink" : tone.stroke}`}
+                strokeWidth={isSelected ? 2.5 : 1.5}
+              />
+              <text
+                x={placement.x + placement.width / 2}
+                y={placement.y + placement.height / 2 - 1}
+                textAnchor="middle"
+                className="fill-ink text-[13px] font-medium"
+              >
+                {placement.number}
+              </text>
+              <text
+                x={placement.x + placement.width / 2}
+                y={placement.y + placement.height / 2 + 11}
+                textAnchor="middle"
+                className="fill-muted text-[8px] tabular-nums"
+              >
+                {taken}/{seats}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function TableDetail({
+  occupancy,
+  unseated,
+  onUnseat,
+  onClose,
+}: {
+  occupancy: TableOccupancy;
+  unseated: Guest[];
+  onUnseat: (guest: Guest) => void;
+  onClose: () => void;
+}) {
+  const taken = occupancy.confirmed + occupancy.pending;
+  const free = occupancy.table.seats - taken;
+
+  return (
+    <div className="bg-white border border-bone rounded-lg shadow-sm p-6">
+      <header className="flex items-baseline justify-between gap-3 mb-1">
+        <h3 className="font-display italic text-2xl m-0">Mesa {occupancy.table.number}</h3>
+        <button
+          className="text-sm text-muted hover:text-ink underline underline-offset-4 cursor-pointer"
+          onClick={onClose}
+        >
+          Cerrar
+        </button>
+      </header>
+      <p className="text-sm text-muted m-0 mb-5">
+        {occupancy.table.zone} · {taken} de {occupancy.table.seats} lugares
+        {free > 0 && ` · ${free} libres`}
+        {free < 0 && ` · ${Math.abs(free)} de más`}
+        {occupancy.pending > 0 && ` · ${occupancy.pending} sin confirmar`}
+      </p>
+
+      {occupancy.guests.length === 0 ? (
+        <p className="text-sm text-subtle italic m-0">
+          Mesa vacía. Sentá gente desde la lista de abajo.
+        </p>
+      ) : (
+        <ul className="flex flex-col gap-2 m-0 p-0 list-none">
+          {occupancy.guests.map((guest) => (
+            <li
+              key={guest.id}
+              className="flex items-baseline justify-between gap-3 border-b border-bone pb-2 last:border-0"
+            >
+              <span className={guest.response === "accept" ? "text-ink" : "text-muted"}>
+                {guest.name}
+                {guest.response !== "accept" && (
+                  <span className="text-subtle text-[0.78rem]"> · sin confirmar</span>
+                )}
+              </span>
+              <span className="flex items-baseline gap-3 shrink-0">
+                <span className="tabular-nums text-subtle">{guestHeadcount(guest)}</span>
+                <button
+                  className="text-sm text-muted hover:text-danger underline underline-offset-4 cursor-pointer"
+                  onClick={() => onUnseat(guest)}
+                >
+                  Sacar
+                </button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {unseated.length > 0 && (
+        <p className="text-[0.78rem] text-subtle mt-5 mb-0">
+          Tocá un nombre de "Sin mesa" para sentarlo acá.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function GuestChip({
+  guest,
+  action,
+  onClick,
+}: {
+  guest: Guest;
+  action?: string;
+  onClick?: () => void;
+}) {
+  const content = (
+    <>
+      <span className={guest.response === "accept" ? "text-ink" : "text-muted"}>{guest.name}</span>
+      <span className="tabular-nums text-subtle">
+        {guestHeadcount(guest)}
+        {guest.response !== "accept" && "?"}
+      </span>
+    </>
+  );
+  const className =
+    "inline-flex items-baseline gap-2 rounded-full border border-bone bg-cream/50 px-3 py-1 text-sm";
+
+  if (!onClick) return <span className={className}>{content}</span>;
+  return (
+    <button
+      className={`${className} cursor-pointer hover:border-ink hover:bg-soft/60 transition-colors`}
+      onClick={onClick}
+      title={action}
+    >
+      {content}
+    </button>
+  );
+}
 
 function SongRecommendationsSection({
   recommendations,
