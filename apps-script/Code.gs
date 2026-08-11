@@ -105,7 +105,7 @@ var ADMIN_PASSPHRASE_KEY = 'ADMIN_PASSPHRASE';
  * deployment" mints a second URL instead of updating the one the app calls.
  * @const {string}
  */
-var CODE_VERSION = '2026-08-11.3';
+var CODE_VERSION = '2026-08-11.4';
 
 // ---------- Public bootstrap ----------
 
@@ -121,26 +121,54 @@ function setup() {
   dropLegacyRsvpsSheet_();
   ensureTextColumns_();
   ensureSheetWithHeaders_(SONG_RECS_TAB, SONG_RECS_HEADERS);
-  var tablesExisted = Boolean(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TABLES_TAB));
   ensureSheetWithHeaders_(TABLES_TAB, TABLES_HEADERS);
-  if (!tablesExisted) seedDefaultTables_();
+  seedDefaultTables_();
   ensureSheetWithHeaders_(SETTINGS_TAB, SETTINGS_HEADERS);
   ensureSettingsTextColumn_();
+  dropConflictSheets_();
+}
+
+/**
+ * Sheets crea copias con sufijo `_conflict…` cuando dos escrituras nacen a la
+ * vez, y `setup` corre en cada request, así que dos llamadas simultáneas
+ * pueden crear la misma pestaña dos veces. Se borran solo las que llevan el
+ * nombre de una pestaña nuestra, para no tocar nada que haya puesto alguien.
+ */
+function dropConflictSheets_() {
+  var known = [GUESTS_TAB, SONG_RECS_TAB, TABLES_TAB, SETTINGS_TAB];
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheets = ss.getSheets();
+  for (var i = 0; i < sheets.length; i++) {
+    var name = sheets[i].getName();
+    for (var j = 0; j < known.length; j++) {
+      if (name.indexOf(known[j] + '_conflict') === 0) {
+        ss.deleteSheet(sheets[i]);
+        break;
+      }
+    }
+  }
 }
 
 /** @const {number} */ var DEFAULT_TABLE_COUNT = 20;
 /** @const {number} */ var DEFAULT_TABLE_SEATS = 8;
+/** @const {string} */ var TABLES_SEEDED_KEY = 'TABLES_SEEDED';
 
 /**
  * Siembra mesas para poder empezar a sentar gente sin cargarlas una por una.
  *
- * Corre UNA sola vez, cuando la pestaña se crea. Si corriera cada vez que la
- * pestaña está vacía, borrar todas las mesas a propósito las haría volver en
- * el request siguiente, porque `setup` se ejecuta en cada llamada.
+ * Corre una sola vez, marcada con una Script Property y no con "¿la pestaña
+ * existe?": la pestaña puede haberse creado vacía por una versión anterior, y
+ * en ese caso el sembrado no se dispararía nunca. El flag además evita que
+ * borrar todas las mesas a propósito las haga volver en el request siguiente,
+ * porque `setup` se ejecuta en cada llamada.
  */
 function seedDefaultTables_() {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty(TABLES_SEEDED_KEY)) return;
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TABLES_TAB);
-  if (!sheet || sheet.getLastRow() >= 2) return;
+  if (!sheet) return;
+  props.setProperty(TABLES_SEEDED_KEY, '1');
+  if (sheet.getLastRow() >= 2) return;
   var rows = [];
   for (var i = 1; i <= DEFAULT_TABLE_COUNT; i++) rows.push([i, DEFAULT_TABLE_SEATS, '']);
   sheet.getRange(2, 1, rows.length, TABLES_HEADERS.length).setValues(rows);
