@@ -1861,6 +1861,12 @@ function InvitationTab({
           onChange={(v) => set("photoUrl", v)}
         />
         <InvitationField
+          label="Audio propio"
+          hint="Ruta del mp3 en el sitio, ej. /cancion.mp3. Si lo cargás, suena el tema entero desde el principio y se ignora Spotify."
+          value={draft.audioUrl}
+          onChange={(v) => set("audioUrl", v)}
+        />
+        <InvitationField
           label="Tema de Spotify"
           hint="Vacío quita la portada con el botón Ver invitación."
           value={draft.spotifyTrackUrl}

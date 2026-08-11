@@ -42,8 +42,12 @@ export function GuestPage() {
     [],
   );
 
+  // El audio propio manda sobre Spotify: suena entero y desde el principio.
+  const ownAudio = invitation.audioUrl;
+  const hasAudio = Boolean(ownAudio) || Boolean(trackId);
+
   const [view, setView] = useState<ViewState>(initialView);
-  const [entered, setEntered] = useState(isDemo || !trackId);
+  const [entered, setEntered] = useState(isDemo || !hasAudio);
   const playerRef = useRef<{ play: () => void } | null>(null);
   const [adultsConfirmed, setAdultsConfirmed] = useState(
     initialView.kind === "ready" ? initialView.guest.adultSlots : 1,
@@ -65,7 +69,7 @@ export function GuestPage() {
   // Preload the Spotify IFrame API script as early as possible so that
   // by the time SpotifyPlayer mounts the script is already cached.
   useEffect(() => {
-    if (!trackId) return;
+    if (!trackId || ownAudio) return;
     if (document.getElementById("spotify-iframe-api-script")) return;
     const script = document.createElement("script");
     script.id = "spotify-iframe-api-script";
@@ -130,7 +134,8 @@ export function GuestPage() {
             music feels out of place. Mounting it during "loading" keeps
             the iframe and IFrame API controller ready by the time the
             cover is dismissed. */}
-        {trackId && (view.kind === "loading" || view.kind === "ready") && (
+        {ownAudio && <OwnAudioPlayer src={ownAudio} playerRef={playerRef} />}
+        {!ownAudio && trackId && (view.kind === "loading" || view.kind === "ready") && (
           <SpotifyPlayer trackId={trackId} playerRef={playerRef} />
         )}
         {view.kind === "ready" && (
@@ -968,6 +973,44 @@ type SpotifyIframeApi = {
     callback: (controller: SpotifyController) => void,
   ) => void;
 };
+
+/**
+ * Reproductor propio. Sirve el archivo desde el mismo dominio, así suena el
+ * tema entero desde el principio y en loop: el embed anónimo de Spotify solo
+ * entrega un recorte de ~25 s tomado de la mitad del tema.
+ *
+ * Al ser del mismo origen, el gesto del invitado en la portada alcanza para
+ * habilitar la reproducción, sin depender de que el navegador delegue el
+ * permiso de autoplay a un iframe de otro dominio.
+ */
+function OwnAudioPlayer({
+  src,
+  playerRef,
+}: {
+  src: string;
+  playerRef: React.MutableRefObject<{ play: () => void } | null>;
+}) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+
+  useEffect(() => {
+    playerRef.current = {
+      play: () => {
+        const audio = audioRef.current;
+        if (!audio) return;
+        void audio.play().catch(() => {
+          // El navegador rechazó la reproducción: queda el control visible
+          // para que el invitado la arranque a mano.
+        });
+      },
+    };
+  }, [playerRef]);
+
+  return (
+    <section className="max-w-2xl mx-auto px-6 -mt-6 sm:-mt-10 mb-2">
+      <audio ref={audioRef} src={src} loop preload="auto" controls className="w-full" />
+    </section>
+  );
+}
 
 function SpotifyPlayer({
   trackId,
