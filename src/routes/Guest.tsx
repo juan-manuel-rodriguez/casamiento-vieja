@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { fetchPublicGuest, type PublicGuest } from "../api/guests";
 import { submitRsvp, type RsvpResponse } from "../api/rsvp";
@@ -7,7 +7,7 @@ import {
   submitSongRecommendation,
   type SpotifyTrack,
 } from "../api/songs";
-import { EVENT } from "../config";
+import { EVENT, MAIN_EVENT } from "../config";
 import { firstName } from "../lib/names";
 
 type ViewState =
@@ -237,7 +237,7 @@ function Hero({ photoStyle }: { photoStyle?: React.CSSProperties }) {
       <p className="flex flex-col sm:flex-row items-center gap-2 sm:gap-3 font-sans text-sm uppercase tracking-[0.18em] text-muted m-0">
         <strong className="font-medium text-ink tracking-[0.22em]">{EVENT.date}</strong>
         <span className="hidden sm:inline" aria-hidden="true">·</span>
-        <span>{EVENT.venue}</span>
+        <span>{MAIN_EVENT.venue}</span>
       </p>
     </header>
   );
@@ -259,30 +259,42 @@ function Greeting({ name }: { name: string }) {
 }
 
 function EventDetails() {
+  const multi = EVENT.events.length > 1;
   return (
     <Section wide>
       <Eyebrow>El plan</Eyebrow>
       <h2 className="font-display italic font-normal text-4xl sm:text-5xl mb-8">Detalles del evento</h2>
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 text-left">
-        <DetailTile eyebrow="Cuándo" title={EVENT.date}>
-          {EVENT.time && (
-            <p className="text-sm text-muted m-0">A partir de las {EVENT.time}, por favor ser puntuales.</p>
-          )}
-        </DetailTile>
-        <DetailTile eyebrow="Dónde" title={EVENT.venue}>
-          {EVENT.address && <p className="text-sm text-muted m-0">{EVENT.address}</p>}
-          {EVENT.mapUrl && (
-            <a
-              className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-gold-dark underline underline-offset-4 decoration-soft hover:text-ink transition-colors"
-              href={EVENT.mapUrl}
-              target="_blank"
-              rel="noreferrer noopener"
+        {EVENT.events.map((occurrence) => (
+          <Fragment key={occurrence.label}>
+            <DetailTile
+              eyebrow={multi ? `Cuándo · ${occurrence.label}` : "Cuándo"}
+              title={occurrence.date}
             >
-              <MapPinIcon />
-              ¿Cómo llego?
-            </a>
-          )}
-        </DetailTile>
+              {occurrence.time && (
+                <p className="text-sm text-muted m-0">A partir de las {occurrence.time}, por favor ser puntuales.</p>
+              )}
+              {occurrence.note && <p className="text-sm text-muted m-0">{occurrence.note}</p>}
+            </DetailTile>
+            <DetailTile
+              eyebrow={multi ? `Dónde · ${occurrence.label}` : "Dónde"}
+              title={occurrence.venue}
+            >
+              {occurrence.address && <p className="text-sm text-muted m-0">{occurrence.address}</p>}
+              {occurrence.mapUrl && (
+                <a
+                  className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-gold-dark underline underline-offset-4 decoration-soft hover:text-ink transition-colors"
+                  href={occurrence.mapUrl}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                >
+                  <MapPinIcon />
+                  ¿Cómo llego?
+                </a>
+              )}
+            </DetailTile>
+          </Fragment>
+        ))}
         <DressCodeTile />
         <DetailTile eyebrow="Confirmar antes del" title={EVENT.rsvpDeadline}>
           <p className="text-sm text-muted m-0">Para que podamos organizar todo a tiempo.</p>
@@ -299,21 +311,25 @@ function GiftAccountSection() {
       <div className="bg-white border border-bone rounded-2xl shadow-md p-8 sm:p-12 mt-6 text-center">
         <h2 className="font-display italic font-normal text-4xl sm:text-5xl mb-4">Lista de regalos</h2>
         <p className="text-muted max-w-prose mx-auto mb-6">{EVENT.giftMessage}</p>
-        <p className="inline-flex items-center rounded-full border border-sand bg-soft/60 px-5 py-1.5 mb-5 text-[0.78rem] uppercase tracking-[0.2em] text-gold-dark font-medium">
-          Banco {EVENT.giftBank}
-        </p>
-        <div className="max-w-sm mx-auto">
-          <div className="flex flex-col items-center gap-2 rounded-xl border border-bone bg-cream/40 px-6 py-5">
-            <span className="text-[0.78rem] uppercase tracking-[0.22em] text-subtle font-medium">
-              {EVENT.giftAccountLabel}
-            </span>
-            <span className="font-sans text-xl sm:text-2xl tracking-[0.06em] text-ink tabular-nums">
-              {EVENT.giftAccountValue}
-            </span>
-          </div>
-          <p className="text-[0.8rem] text-subtle mt-3">
-            La cuenta está a nombre de {EVENT.giftAccountHolder}.
-          </p>
+        <div className="max-w-sm mx-auto grid gap-10">
+          {EVENT.giftAccounts.map((account) => (
+            <div key={account.value}>
+              <p className="inline-flex items-center rounded-full border border-sand bg-soft/60 px-5 py-1.5 mb-5 text-[0.78rem] uppercase tracking-[0.2em] text-gold-dark font-medium">
+                {account.bank}
+              </p>
+              <div className="flex flex-col items-center gap-2 rounded-xl border border-bone bg-cream/40 px-6 py-5">
+                <span className="text-[0.78rem] uppercase tracking-[0.22em] text-subtle font-medium">
+                  {account.label}
+                </span>
+                <span className="font-sans text-xl sm:text-2xl tracking-[0.06em] text-ink tabular-nums">
+                  {account.value}
+                </span>
+              </div>
+              <p className="text-[0.8rem] text-subtle mt-3">
+                La cuenta está a nombre de {account.holder}.
+              </p>
+            </div>
+          ))}
         </div>
       </div>
     </Section>

@@ -43,11 +43,28 @@ export const APPS_SCRIPT_URL = "https://script.google.com/macros/s/.../exec";
 
 export const EVENT = {
   couple: "Juana & Manuel",
-  date: "15 de marzo de 2026",
+  date: "15 de marzo de 2026",          // titular: portada y hero
+  sides: [                               // quién invita a cada invitado
+    { value: "juana", label: "Juana" },
+    { value: "manuel", label: "Manuel" },
+  ],
+  events: [                              // una o más: civil, fiesta…
+    { label: "Fiesta", date: "…", time: "…", venue: "…", address: "…", mapUrl: "…" },
+  ],
+  giftAccounts: [                        // una o más cuentas
+    { bank: "Banco X", label: "Caja de ahorro", value: "123", holder: "Nombre" },
+  ],
   spotifyTrackUrl: "https://open.spotify.com/track/...", // opcional: música de fondo
   // …
 };
 ```
+
+Cuando `events` tiene más de una entrada, los tiles de "Cuándo" y "Dónde" se
+repiten por evento con la etiqueta como sufijo. Con una sola entrada dicen
+"Cuándo" y "Dónde" a secas.
+
+Si `spotifyTrackUrl` queda vacío no se muestra la portada con el botón "Ver
+invitación": existe solo para que un click habilite el autoplay del reproductor.
 
 ### 3. Spotify (búsqueda de canciones)
 

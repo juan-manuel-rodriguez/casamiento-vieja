@@ -14,6 +14,7 @@ import {
   type SongRecommendation,
 } from "../api/songs";
 import { clearPassphrase, loadPassphrase, savePassphrase } from "../auth/passphrase";
+import { EVENT } from "../config";
 import { firstName } from "../lib/names";
 import {
   PLAN_VIEWBOX,
@@ -49,7 +50,8 @@ const EMPTY_DRAFT: NewGuestDraft = {
 
 type Filters = {
   search: string;
-  side: "all" | "vale" | "juan" | "unassigned";
+  /** "all", "unassigned", or a `value` from EVENT.sides. */
+  side: string;
   response: "all" | "pending" | "accept" | "decline";
   sent: "all" | "sent" | "unsent";
   /** "all", "none", or a table number as text. */
@@ -365,11 +367,14 @@ export function AdminPage() {
               <select
                 className="admin-input"
                 value={draft.side}
-                onChange={(e) => setDraft({ ...draft, side: e.target.value as "vale" | "juan" | "" })}
+                onChange={(e) => setDraft({ ...draft, side: e.target.value })}
               >
                 <option value="">Sin asignar</option>
-                <option value="vale">Vale</option>
-                <option value="juan">Juan</option>
+                {EVENT.sides.map((side) => (
+                  <option key={side.value} value={side.value}>
+                    {side.label}
+                  </option>
+                ))}
               </select>
             </DraftField>
             <DraftField label="Mesa">
@@ -432,8 +437,10 @@ export function AdminPage() {
           onChange={(side) => setFilters({ ...filters, side })}
           options={[
             { value: "all", label: "Invita: todos" },
-            { value: "vale", label: "Invita Vale" },
-            { value: "juan", label: "Invita Juan" },
+            ...EVENT.sides.map((side) => ({
+              value: side.value,
+              label: `Invita ${side.label}`,
+            })),
             { value: "unassigned", label: "Sin asignar" },
           ]}
         />
@@ -948,9 +955,7 @@ function GuestTable({
 
 
 function guestSideLabel(side: Guest["side"]) {
-  if (side === "vale") return "Vale";
-  if (side === "juan") return "Juan";
-  return "Sin asignar";
+  return EVENT.sides.find((s) => s.value === side)?.label ?? "Sin asignar";
 }
 
 function Th({ children, ...rest }: React.ThHTMLAttributes<HTMLTableCellElement>) {

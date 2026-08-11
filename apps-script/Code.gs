@@ -611,8 +611,9 @@ function handleUpsertGuest_(params) {
   var adultSlots = Math.max(1, Math.round(Number(input.adultSlots) || 1));
   var kidSlots = Math.max(0, Math.round(Number(input.kidSlots) || 0));
   var invitationSent = Boolean(input.invitationSent);
-  var side = String(input.side || '').trim().toLowerCase();
-  if (side !== 'vale' && side !== 'juan') side = '';
+  // La lista de lados vive en src/config.ts. Este endpoint pide auth de admin,
+  // así que alcanza con normalizar y acotar el largo en vez de whitelistear.
+  var side = String(input.side || '').trim().toLowerCase().slice(0, 32);
   var contact = input.contact == null ? '' : String(input.contact);
   var notes = input.notes == null ? '' : String(input.notes);
   // Free text on purpose: the table list lives in the frontend, and a value

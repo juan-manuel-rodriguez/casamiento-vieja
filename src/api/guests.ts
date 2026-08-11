@@ -4,7 +4,8 @@ export type Guest = {
   rowIndex: number;
   id: string;
   name: string;
-  side: "vale" | "juan" | "";
+  /** A `value` from EVENT.sides, or "" when unassigned. */
+  side: string;
   /** Table number as text (see VENUE_TABLES), or "" when unseated. */
   table: string;
   adultSlots: number;
@@ -46,7 +47,8 @@ export async function listGuests(auth: string): Promise<Guest[]> {
 export type GuestInput = {
   id?: string;
   name: string;
-  side: "vale" | "juan" | "";
+  /** A `value` from EVENT.sides, or "" when unassigned. */
+  side: string;
   table: string;
   adultSlots: number;
   kidSlots: number;
