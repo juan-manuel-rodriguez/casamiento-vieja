@@ -1,4 +1,6 @@
 import { getJson, postJson } from "./client";
+import { applyEventOverrides } from "../lib/event";
+import type { EventOverrides } from "./settings";
 
 export type Guest = {
   rowIndex: number;
@@ -23,11 +25,18 @@ export type Guest = {
 /** Minimal projection of a guest exposed to the public guest page. */
 export type PublicGuest = Pick<Guest, "id" | "name" | "adultSlots" | "kidSlots">;
 
+/**
+ * El backend devuelve el contenido de la invitación junto con el invitado: la
+ * página ya esperaba esta respuesta antes de pintar, así que traerlo acá no
+ * agrega ninguna vuelta de red.
+ */
 export async function fetchPublicGuest(id: string): Promise<PublicGuest | null> {
-  const response = await getJson<{ found: boolean; guest?: PublicGuest }>({
-    action: "getGuest",
-    id,
-  });
+  const response = await getJson<{
+    found: boolean;
+    guest?: PublicGuest;
+    settings?: EventOverrides;
+  }>({ action: "getGuest", id });
+  applyEventOverrides(response.settings);
   return response.found && response.guest ? response.guest : null;
 }
 

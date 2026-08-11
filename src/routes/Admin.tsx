@@ -10,21 +10,22 @@ import {
   type GuestInput,
 } from "../api/guests";
 import {
+  deleteSongRecommendation,
   listSongRecommendations,
   type SongRecommendation,
 } from "../api/songs";
 import { clearPassphrase, loadPassphrase, savePassphrase } from "../auth/passphrase";
-import { EVENT } from "../config";
+import type { EventConfig, EventOccurrence, GiftAccount } from "../config";
+import { getEvent, useEvent, applyEventOverrides } from "../lib/event";
 import { firstName } from "../lib/names";
 import {
-  PLAN_VIEWBOX,
-  TABLE_PLACEMENTS,
-  TOTAL_SEATS,
-  TOTAL_TABLES,
-  VENUE_TABLES,
-  type VenueTable,
+  planLayout,
   seatPositions,
+  totalSeats,
+  type VenueTable,
 } from "../lib/tables";
+import { listTables, saveTables } from "../api/tables";
+import { fetchSettings, saveSettings } from "../api/settings";
 
 type ViewState =
   | { kind: "needs-passphrase"; error?: string }
@@ -33,6 +34,7 @@ type ViewState =
       kind: "ready";
       guests: Guest[];
       songRecommendations: SongRecommendation[];
+      venueTables: VenueTable[];
     }
   | { kind: "error"; message: string };
 
@@ -66,12 +68,13 @@ const EMPTY_FILTERS: Filters = {
   table: "all",
 };
 
-type TabId = "guests" | "tables" | "songs";
+type TabId = "guests" | "tables" | "songs" | "invitation";
 
 const TABS: Array<{ id: TabId; label: string }> = [
   { id: "guests", label: "Invitados" },
   { id: "tables", label: "Mesas" },
   { id: "songs", label: "Canciones" },
+  { id: "invitation", label: "Invitación" },
 ];
 
 function applyFilters(guests: Guest[], filters: Filters): Guest[] {
@@ -112,6 +115,7 @@ export function AdminPage() {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [tab, setTab] = useState<TabId>("guests");
   const [busy, setBusy] = useState(false);
+  const invitation = useEvent();
 
   async function withBusy(fn: () => Promise<void>): Promise<void> {
     if (busy) return;
@@ -134,14 +138,21 @@ export function AdminPage() {
     // covers the in-flight state.
     setView((current) => (current.kind === "ready" ? current : { kind: "loading" }));
     try {
-      const [guests, songRecommendations] = await Promise.all([
+      // Las mesas y el contenido de la invitación son endpoints nuevos: si el
+      // Apps Script todavía no se redeployó, no existen. En ese caso el admin
+      // tiene que seguir sirviendo para lo de siempre en vez de morirse.
+      const [guests, songRecommendations, venueTables, settings] = await Promise.all([
         listGuests(activeAuth),
         listSongRecommendations(activeAuth),
+        listTables(activeAuth).catch(() => [] as VenueTable[]),
+        fetchSettings().catch(() => ({})),
       ]);
+      applyEventOverrides(settings);
       setView({
         kind: "ready",
         guests,
         songRecommendations,
+        venueTables,
       });
     } catch (err) {
       const message = errorMessage(err);
@@ -177,28 +188,38 @@ export function AdminPage() {
     setView({ kind: "needs-passphrase" });
   }
 
-  async function toggleInvitationSent(guest: Guest) {
+  /**
+   * Guarda un cambio puntual de un invitado pintándolo en pantalla de
+   * inmediato, sin overlay ni recarga.
+   *
+   * Antes esto hacía la escritura y después un refresh completo: dos viajes a
+   * Apps Script, con la pantalla bloqueada, para tildar una casilla. Ahora el
+   * cambio se ve al toque y la escritura viaja de fondo; si falla, se avisa y
+   * se recarga para no dejar la pantalla mintiendo.
+   */
+  async function saveGuestChange(guest: Guest, patch: Partial<Guest>) {
     if (!auth) return;
-    await withBusy(async () => {
-      try {
-        await upsertGuest(auth, { ...guest, invitationSent: !guest.invitationSent });
-        await refresh();
-      } catch (err) {
-        setView({ kind: "error", message: errorMessage(err) });
-      }
-    });
+    const next = { ...guest, ...patch };
+    setView((current) =>
+      current.kind === "ready"
+        ? { ...current, guests: current.guests.map((g) => (g.id === guest.id ? next : g)) }
+        : current,
+    );
+    try {
+      await upsertGuest(auth, next);
+    } catch (err) {
+      setView({ kind: "error", message: errorMessage(err) });
+      await refresh();
+    }
+  }
+
+  async function toggleInvitationSent(guest: Guest) {
+    await saveGuestChange(guest, { invitationSent: !guest.invitationSent });
   }
 
   async function changeTable(guest: Guest, table: string) {
-    if (!auth || table === (guest.table || "")) return;
-    await withBusy(async () => {
-      try {
-        await upsertGuest(auth, { ...guest, table });
-        await refresh();
-      } catch (err) {
-        setView({ kind: "error", message: errorMessage(err) });
-      }
-    });
+    if (table === (guest.table || "")) return;
+    await saveGuestChange(guest, { table });
   }
 
   async function handleDelete(guest: Guest) {
@@ -286,7 +307,7 @@ export function AdminPage() {
     );
   }
 
-  const { guests, songRecommendations } = view;
+  const { guests, songRecommendations, venueTables } = view;
   // Plain calls, not useMemo: this runs after the early returns above, where
   // hooks are off limits, and filtering a wedding-sized list is free.
   const filtered = applyFilters(guests, filters);
@@ -370,7 +391,7 @@ export function AdminPage() {
                 onChange={(e) => setDraft({ ...draft, side: e.target.value })}
               >
                 <option value="">Sin asignar</option>
-                {EVENT.sides.map((side) => (
+                {invitation.sides.map((side) => (
                   <option key={side.value} value={side.value}>
                     {side.label}
                   </option>
@@ -384,7 +405,7 @@ export function AdminPage() {
                 onChange={(e) => setDraft({ ...draft, table: e.target.value })}
               >
                 <option value="">Sin mesa</option>
-                {VENUE_TABLES.map((table) => (
+                {venueTables.map((table) => (
                   <option key={table.number} value={String(table.number)}>
                     Mesa {table.number} · {table.seats} lugares
                   </option>
@@ -437,7 +458,7 @@ export function AdminPage() {
           onChange={(side) => setFilters({ ...filters, side })}
           options={[
             { value: "all", label: "Invita: todos" },
-            ...EVENT.sides.map((side) => ({
+            ...invitation.sides.map((side) => ({
               value: side.value,
               label: `Invita ${side.label}`,
             })),
@@ -471,7 +492,7 @@ export function AdminPage() {
           onChange={(table) => setFilters({ ...filters, table })}
           options={[
             { value: "all", label: "Mesa: todas" },
-            ...VENUE_TABLES.map((table) => ({
+            ...venueTables.map((table) => ({
               value: String(table.number),
               label: `Mesa ${table.number} · ${table.seats}`,
             })),
@@ -499,6 +520,7 @@ export function AdminPage() {
       <GuestTable
         guests={filtered}
         totalGuests={guests.length}
+        venueTables={venueTables}
         onChangeTable={changeTable}
         onToggleInvitation={toggleInvitationSent}
         onCopyLink={copyGuestLink}
@@ -508,10 +530,43 @@ export function AdminPage() {
         </>
       )}
 
-      {tab === "tables" && <TablesTab guests={guests} onChangeTable={changeTable} />}
+      {tab === "tables" && (
+        <TablesTab
+          guests={guests}
+          venueTables={venueTables}
+          onChangeTable={changeTable}
+          onSaveTables={(next) =>
+            withBusy(async () => {
+              await saveTables(auth!, next);
+              await refresh();
+            })
+          }
+        />
+      )}
 
       {tab === "songs" && (
-        <SongRecommendationsSection recommendations={songRecommendations} guests={guests} />
+        <SongRecommendationsSection
+          recommendations={songRecommendations}
+          guests={guests}
+          onDelete={(rowIndex) =>
+            withBusy(async () => {
+              await deleteSongRecommendation(auth!, rowIndex);
+              await refresh();
+            })
+          }
+        />
+      )}
+
+      {tab === "invitation" && (
+        <InvitationTab
+          invitation={invitation}
+          onSave={(next) =>
+            withBusy(async () => {
+              await saveSettings(auth!, next);
+              await refresh();
+            })
+          }
+        />
       )}
     </main>
   );
@@ -715,6 +770,7 @@ type TableProps = {
   guests: Guest[];
   /** Unfiltered count, so the empty state can tell "no guests" from "no matches". */
   totalGuests: number;
+  venueTables: readonly VenueTable[];
   onChangeTable: (guest: Guest, table: string) => void;
   onToggleInvitation: (guest: Guest) => void;
   onCopyLink: (id: string) => void;
@@ -725,10 +781,12 @@ type TableProps = {
 /** Table picker, shared by the desktop row and the mobile card. */
 function TablePicker({
   guest,
+  venueTables,
   onChange,
   className = "",
 }: {
   guest: Guest;
+  venueTables: readonly VenueTable[];
   onChange: (guest: Guest, table: string) => void;
   className?: string;
 }) {
@@ -740,7 +798,7 @@ function TablePicker({
       onChange={(e) => onChange(guest, e.target.value)}
     >
       <option value="">Sin mesa</option>
-      {VENUE_TABLES.map((table) => (
+      {venueTables.map((table) => (
         <option key={table.number} value={String(table.number)}>
           Mesa {table.number} · {table.seats}
         </option>
@@ -820,6 +878,7 @@ function GuestSlots({ guest }: { guest: Guest }) {
 function GuestTable({
   guests,
   totalGuests,
+  venueTables,
   onChangeTable,
   onToggleInvitation,
   onCopyLink,
@@ -865,7 +924,7 @@ function GuestTable({
                 <SentCheckbox guest={guest} onToggle={onToggleInvitation} />
                 Enviada
               </label>
-              <TablePicker guest={guest} onChange={onChangeTable} className="w-36" />
+              <TablePicker guest={guest} venueTables={venueTables} onChange={onChangeTable} className="w-36" />
             </div>
 
             {guest.comment && <p className="text-sm text-muted mt-3 mb-0">{guest.comment}</p>}
@@ -919,7 +978,7 @@ function GuestTable({
                   </div>
                 </Td>
                 <Td>
-                  <TablePicker guest={guest} onChange={onChangeTable} className="w-36" />
+                  <TablePicker guest={guest} venueTables={venueTables} onChange={onChangeTable} className="w-36" />
                 </Td>
                 {/* Invited vs confirmed in one column: the second number only
                     means anything next to the first one. */}
@@ -955,7 +1014,7 @@ function GuestTable({
 
 
 function guestSideLabel(side: Guest["side"]) {
-  return EVENT.sides.find((s) => s.value === side)?.label ?? "Sin asignar";
+  return getEvent().sides.find((s) => s.value === side)?.label ?? "Sin asignar";
 }
 
 function Th({ children, ...rest }: React.ThHTMLAttributes<HTMLTableCellElement>) {
@@ -994,13 +1053,16 @@ type TableOccupancy = {
  * Headcount per table. A guest who has not answered still holds their full
  * slots, since that is what the table has to absorb if they show up.
  */
-function buildOccupancy(guests: Guest[]): {
+function buildOccupancy(
+  guests: Guest[],
+  venueTables: readonly VenueTable[],
+): {
   tables: TableOccupancy[];
   unseated: Guest[];
   unseatedPeople: number;
 } {
   const byTable = new Map<number, TableOccupancy>();
-  for (const table of VENUE_TABLES) {
+  for (const table of venueTables) {
     byTable.set(table.number, { table, guests: [], confirmed: 0, pending: 0 });
   }
 
@@ -1029,13 +1091,21 @@ function buildOccupancy(guests: Guest[]): {
 
 function TablesTab({
   guests,
+  venueTables,
   onChangeTable,
+  onSaveTables,
 }: {
   guests: Guest[];
+  venueTables: readonly VenueTable[];
   onChangeTable: (guest: Guest, table: string) => void;
+  onSaveTables: (tables: VenueTable[]) => Promise<void>;
 }) {
   const [selected, setSelected] = useState<number | null>(null);
-  const { tables, unseated, unseatedPeople } = useMemo(() => buildOccupancy(guests), [guests]);
+  const [editing, setEditing] = useState(false);
+  const { tables, unseated, unseatedPeople } = useMemo(
+    () => buildOccupancy(guests, venueTables),
+    [guests, venueTables],
+  );
   const byNumber = new Map(tables.map((entry) => [entry.table.number, entry]));
   const seated = tables.reduce((sum, entry) => sum + entry.confirmed + entry.pending, 0);
   const current = selected == null ? null : (byNumber.get(selected) ?? null);
@@ -1044,21 +1114,39 @@ function TablesTab({
     <section>
       <div className="flex flex-wrap gap-3 items-baseline mb-6 text-sm">
         <span className="text-muted tabular-nums">
-          {seated} de {TOTAL_SEATS} lugares ocupados
+          {seated} de {totalSeats(venueTables)} lugares ocupados
         </span>
         <span className="text-subtle">·</span>
-        <span className="text-muted tabular-nums">{TOTAL_TABLES} mesas</span>
+        <span className="text-muted tabular-nums">{venueTables.length} mesas</span>
         {unseatedPeople > 0 && (
           <>
             <span className="text-subtle">·</span>
             <span className="text-danger tabular-nums">{unseatedPeople} personas sin mesa</span>
           </>
         )}
+        <button
+          type="button"
+          onClick={() => setEditing((v) => !v)}
+          className="ml-auto text-sm font-medium text-gold-dark underline underline-offset-4 decoration-soft hover:text-ink cursor-pointer bg-transparent border-0 p-0"
+        >
+          {editing ? "Cerrar" : "Editar mesas"}
+        </button>
       </div>
+
+      {editing && (
+        <TablesEditor
+          venueTables={venueTables}
+          onSave={async (next) => {
+            await onSaveTables(next);
+            setEditing(false);
+          }}
+        />
+      )}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] items-start">
         <FloorPlan
           tables={tables}
+          venueTables={venueTables}
           selected={selected}
           onSelect={(number) => setSelected((prev) => (prev === number ? null : number))}
         />
@@ -1113,26 +1201,57 @@ function guestHeadcount(guest: Guest): number {
     : guest.adultSlots + guest.kidSlots;
 }
 
+/**
+ * El plano se arma solo a partir de la lista de mesas: una franja por sector y
+ * una grilla adentro. Antes las coordenadas estaban dibujadas a mano para un
+ * salón puntual, que es justo lo que impedía reusar la app en otro casamiento.
+ */
 function FloorPlan({
   tables,
+  venueTables,
   selected,
   onSelect,
 }: {
   tables: TableOccupancy[];
+  venueTables: readonly VenueTable[];
   selected: number | null;
   onSelect: (number: number) => void;
 }) {
   const byNumber = new Map(tables.map((entry) => [entry.table.number, entry]));
+  const plan = useMemo(() => planLayout(venueTables), [venueTables]);
+
+  if (venueTables.length === 0) {
+    return (
+      <div className="bg-white border border-bone rounded-lg shadow-sm p-6">
+        <p className="text-muted text-sm m-0">
+          Todavía no cargaste ninguna mesa. Usá "Editar mesas" para armar el salón.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white border border-bone rounded-lg shadow-sm p-4 lg:sticky lg:top-4">
       <svg
-        viewBox={`-16 -16 ${PLAN_VIEWBOX.width + 32} ${PLAN_VIEWBOX.height + 32}`}
+        viewBox={`-20 -16 ${plan.viewBox.width + 40} ${plan.viewBox.height + 32}`}
         className="w-full h-auto max-h-[60vh] lg:max-h-[75vh]"
         role="img"
         aria-label="Plano de mesas"
       >
-        {TABLE_PLACEMENTS.map((placement) => {
+        {plan.zoneBands.map((band) =>
+          band.zone ? (
+            <text
+              key={`${band.zone}-${band.y}`}
+              x={0}
+              y={band.y + 18}
+              className="fill-muted"
+              style={{ fontSize: 13, letterSpacing: "0.14em", textTransform: "uppercase" }}
+            >
+              {band.zone}
+            </text>
+          ) : null,
+        )}
+        {plan.placements.map((placement) => {
           const entry = byNumber.get(placement.number);
           if (!entry) return null;
           const taken = entry.confirmed + entry.pending;
@@ -1307,9 +1426,11 @@ function GuestChip({
 function SongRecommendationsSection({
   recommendations,
   guests,
+  onDelete,
 }: {
   recommendations: SongRecommendation[];
   guests: Guest[];
+  onDelete: (rowIndex: number) => Promise<void>;
 }) {
   const guestNameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -1334,7 +1455,7 @@ function SongRecommendationsSection({
               <Th>Invitado</Th>
               <Th>Canción</Th>
               <Th>Artistas</Th>
-              <Th aria-label="Link"></Th>
+              <Th aria-label="Acciones"></Th>
             </tr>
           </thead>
           <tbody>
@@ -1350,7 +1471,11 @@ function SongRecommendationsSection({
                 key={`${rec.timestamp}-${rec.trackId}-${idx}`}
                 className="border-t border-bone hover:bg-soft/30 transition-colors"
               >
-                <Td>{guestNameById.get(rec.guestId) ?? rec.guestId}</Td>
+                <Td>
+                  {guestNameById.get(rec.guestId) ?? (
+                    <span className="text-subtle italic">Invitado borrado</span>
+                  )}
+                </Td>
                 <Td>
                   <span className="font-medium text-ink">{rec.trackName}</span>
                 </Td>
@@ -1368,6 +1493,17 @@ function SongRecommendationsSection({
                       <FaSpotify size={17} aria-hidden="true" />
                     </a>
                   )}
+                  <button
+                    type="button"
+                    className="icon-action icon-action--danger ml-2"
+                    title="Borrar recomendación"
+                    aria-label={`Borrar ${rec.trackName}`}
+                    onClick={() => {
+                      if (confirm(`¿Borrar "${rec.trackName}" de la lista?`)) void onDelete(rec.rowIndex);
+                    }}
+                  >
+                    <LuTrash2 size={17} aria-hidden="true" />
+                  </button>
                 </Td>
               </tr>
             ))}
@@ -1461,4 +1597,431 @@ function EmptyAdminState({
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : "Error desconocido";
+}
+
+
+/**
+ * Alta y baja de mesas. Se edita la lista entera y se guarda de una: el
+ * backend pisa la pestaña completa, así nunca queda a mitad de camino.
+ *
+ * El número de mesa es lo que se guarda junto a cada invitado, así que
+ * cambiarlo resienta gente en silencio. Por eso el número no se edita: se
+ * borra la mesa y se crea otra.
+ */
+function TablesEditor({
+  venueTables,
+  onSave,
+}: {
+  venueTables: readonly VenueTable[];
+  onSave: (tables: VenueTable[]) => Promise<void>;
+}) {
+  const [rows, setRows] = useState<VenueTable[]>(() => venueTables.map((t) => ({ ...t })));
+  const [error, setError] = useState<string | null>(null);
+
+  const nextNumber = rows.reduce((max, row) => Math.max(max, row.number), 0) + 1;
+
+  function update(index: number, patch: Partial<VenueTable>) {
+    setRows((current) => current.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  }
+
+  return (
+    <div className="bg-white border border-bone rounded-lg shadow-sm p-5 mb-6">
+      <h3 className="text-[0.78rem] uppercase tracking-[0.22em] text-muted font-medium mb-4">
+        Mesas del salón
+      </h3>
+
+      <div className="grid gap-2">
+        {rows.map((row, index) => (
+          <div key={row.number} className="flex flex-wrap items-center gap-2">
+            <span className="w-16 text-sm text-muted tabular-nums shrink-0">Mesa {row.number}</span>
+            <label className="flex items-center gap-2 text-sm text-muted">
+              Lugares
+              <input
+                type="number"
+                min={1}
+                className="admin-input w-20"
+                value={row.seats}
+                onChange={(e) => update(index, { seats: Math.max(1, Number(e.target.value) || 1) })}
+              />
+            </label>
+            <input
+              className="admin-input flex-1 min-w-40"
+              placeholder="Sector (opcional)"
+              value={row.zone}
+              onChange={(e) => update(index, { zone: e.target.value })}
+            />
+            <button
+              type="button"
+              className="icon-action icon-action--danger"
+              title={`Borrar la mesa ${row.number}`}
+              aria-label={`Borrar la mesa ${row.number}`}
+              onClick={() => setRows((current) => current.filter((_, i) => i !== index))}
+            >
+              <LuTrash2 size={16} aria-hidden="true" />
+            </button>
+          </div>
+        ))}
+        {rows.length === 0 && (
+          <p className="text-sm text-subtle italic m-0">No hay mesas todavía.</p>
+        )}
+      </div>
+
+      {error && <p className="text-sm text-danger mt-3 mb-0">{error}</p>}
+
+      <div className="flex flex-wrap gap-3 mt-5">
+        <button
+          type="button"
+          className="btn-ghost"
+          onClick={() =>
+            setRows((current) => [...current, { number: nextNumber, seats: 10, zone: "" }])
+          }
+        >
+          Agregar mesa
+        </button>
+        <button
+          type="button"
+          className="btn-primary"
+          onClick={() => {
+            setError(null);
+            void onSave(rows).catch((err: unknown) => setError(errorMessage(err)));
+          }}
+        >
+          Guardar mesas
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Una lista de textos se edita como un renglón por ítem. */
+function linesToArray(text: string): string[] {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function InvitationField({
+  label,
+  hint,
+  value,
+  rows = 1,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  value: string;
+  rows?: number;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-1.5">
+      <span className="text-[0.78rem] uppercase tracking-[0.16em] text-muted font-medium">
+        {label}
+      </span>
+      {rows > 1 ? (
+        <textarea
+          className="admin-input resize-y"
+          rows={rows}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      ) : (
+        <input className="admin-input" value={value} onChange={(e) => onChange(e.target.value)} />
+      )}
+      {hint && <span className="text-[0.78rem] text-subtle">{hint}</span>}
+    </label>
+  );
+}
+
+/**
+ * Edición del contenido de la invitación. Guarda el objeto entero de una, no
+ * campo por campo, así el Sheet nunca queda con una mezcla de dos versiones.
+ */
+function InvitationTab({
+  invitation,
+  onSave,
+}: {
+  invitation: EventConfig;
+  onSave: (next: EventConfig) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState<EventConfig>(() => structuredClone(invitation));
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  function set<K extends keyof EventConfig>(key: K, value: EventConfig[K]) {
+    setSaved(false);
+    setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  function setEvent(index: number, patch: Partial<EventOccurrence>) {
+    set(
+      "events",
+      draft.events.map((occurrence, i) => (i === index ? { ...occurrence, ...patch } : occurrence)),
+    );
+  }
+
+  function setAccount(index: number, patch: Partial<GiftAccount>) {
+    set(
+      "giftAccounts",
+      draft.giftAccounts.map((account, i) => (i === index ? { ...account, ...patch } : account)),
+    );
+  }
+
+  return (
+    <section className="max-w-3xl">
+      <p className="text-sm text-muted mb-6">
+        Lo que guardes acá se ve en la invitación al instante, sin republicar el sitio.
+      </p>
+
+      <div className="bg-white border border-bone rounded-lg shadow-sm p-5 mb-5 grid gap-4">
+        <h3 className="text-[0.78rem] uppercase tracking-[0.22em] text-muted font-medium m-0">
+          Encabezado
+        </h3>
+        <InvitationField label="Pareja" value={draft.couple} onChange={(v) => set("couple", v)} />
+        <InvitationField
+          label="Firma del pie"
+          value={draft.signature}
+          onChange={(v) => set("signature", v)}
+        />
+        <InvitationField label="Frase" value={draft.tagline} onChange={(v) => set("tagline", v)} />
+        <InvitationField
+          label="Fecha del titular"
+          hint="La que se muestra en la portada y el hero."
+          value={draft.date}
+          onChange={(v) => set("date", v)}
+        />
+        <InvitationField
+          label="Foto"
+          hint="Ruta dentro del sitio, por ejemplo /sebayemi.jpeg, o una URL completa."
+          value={draft.photoUrl}
+          onChange={(v) => set("photoUrl", v)}
+        />
+        <InvitationField
+          label="Tema de Spotify"
+          hint="Vacío quita la portada con el botón Ver invitación."
+          value={draft.spotifyTrackUrl}
+          onChange={(v) => set("spotifyTrackUrl", v)}
+        />
+      </div>
+
+      {draft.events.map((occurrence, index) => (
+        <div key={index} className="bg-white border border-bone rounded-lg shadow-sm p-5 mb-5 grid gap-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-[0.78rem] uppercase tracking-[0.22em] text-muted font-medium m-0">
+              Evento {index + 1}
+            </h3>
+            <button
+              type="button"
+              className="icon-action icon-action--danger"
+              title="Borrar este evento"
+              aria-label={`Borrar el evento ${index + 1}`}
+              onClick={() => set("events", draft.events.filter((_, i) => i !== index))}
+            >
+              <LuTrash2 size={16} aria-hidden="true" />
+            </button>
+          </div>
+          <InvitationField
+            label="Título"
+            value={occurrence.label}
+            onChange={(v) => setEvent(index, { label: v })}
+          />
+          <InvitationField
+            label="Fecha"
+            value={occurrence.date}
+            onChange={(v) => setEvent(index, { date: v })}
+          />
+          <InvitationField
+            label="Hora"
+            value={occurrence.time}
+            onChange={(v) => setEvent(index, { time: v })}
+          />
+          <InvitationField
+            label="Lugar"
+            value={occurrence.venue}
+            onChange={(v) => setEvent(index, { venue: v })}
+          />
+          <InvitationField
+            label="Dirección"
+            value={occurrence.address}
+            onChange={(v) => setEvent(index, { address: v })}
+          />
+          <InvitationField
+            label="Link del mapa"
+            value={occurrence.mapUrl}
+            onChange={(v) => setEvent(index, { mapUrl: v })}
+          />
+          <InvitationField
+            label="Nota"
+            hint="Renglón extra bajo el lugar. Opcional."
+            value={occurrence.note ?? ""}
+            onChange={(v) => setEvent(index, { note: v })}
+          />
+          <label className="flex flex-wrap items-center gap-4 text-sm text-muted">
+            <span className="flex items-center gap-2">
+              Ícono
+              <select
+                className="admin-input"
+                value={occurrence.icon}
+                onChange={(e) => setEvent(index, { icon: e.target.value as "rings" | "party" })}
+              >
+                <option value="rings">Alianzas</option>
+                <option value="party">Copas</option>
+              </select>
+            </span>
+            <span className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                className="admin-checkbox"
+                checked={Boolean(occurrence.showDressCode)}
+                onChange={(e) => setEvent(index, { showDressCode: e.target.checked })}
+              />
+              Mostrar la vestimenta acá
+            </span>
+          </label>
+        </div>
+      ))}
+
+      <button
+        type="button"
+        className="btn-ghost mb-6"
+        onClick={() =>
+          set("events", [
+            ...draft.events,
+            { label: "", date: "", time: "", venue: "", address: "", mapUrl: "", icon: "party" },
+          ])
+        }
+      >
+        Agregar evento
+      </button>
+
+      <div className="bg-white border border-bone rounded-lg shadow-sm p-5 mb-5 grid gap-4">
+        <h3 className="text-[0.78rem] uppercase tracking-[0.22em] text-muted font-medium m-0">
+          Vestimenta
+        </h3>
+        <InvitationField
+          label="Vestimenta"
+          value={draft.dressCode}
+          onChange={(v) => set("dressCode", v)}
+        />
+        <InvitationField
+          label="Descripción"
+          rows={2}
+          value={draft.dressCodeDescription}
+          onChange={(v) => set("dressCodeDescription", v)}
+        />
+        <InvitationField
+          label="Ellas"
+          hint="Un renglón por ítem."
+          rows={4}
+          value={draft.dressCodeWomen.join("\n")}
+          onChange={(v) => set("dressCodeWomen", linesToArray(v))}
+        />
+        <InvitationField
+          label="Ellos"
+          hint="Un renglón por ítem."
+          rows={4}
+          value={draft.dressCodeMen.join("\n")}
+          onChange={(v) => set("dressCodeMen", linesToArray(v))}
+        />
+        <InvitationField
+          label="Evitar"
+          hint="Un renglón por ítem."
+          rows={4}
+          value={draft.dressCodeAvoid.join("\n")}
+          onChange={(v) => set("dressCodeAvoid", linesToArray(v))}
+        />
+      </div>
+
+      <div className="bg-white border border-bone rounded-lg shadow-sm p-5 mb-5 grid gap-4">
+        <h3 className="text-[0.78rem] uppercase tracking-[0.22em] text-muted font-medium m-0">
+          Regalo y confirmación
+        </h3>
+        <InvitationField
+          label="Texto del regalo"
+          rows={3}
+          value={draft.giftMessage}
+          onChange={(v) => set("giftMessage", v)}
+        />
+        {draft.giftAccounts.map((account, index) => (
+          <div key={index} className="grid gap-3 sm:grid-cols-2 border-t border-bone pt-4">
+            <InvitationField
+              label="Banco"
+              value={account.bank}
+              onChange={(v) => setAccount(index, { bank: v })}
+            />
+            <InvitationField
+              label="Moneda"
+              hint='Se compone como "Cuenta PREX pesos".'
+              value={account.label}
+              onChange={(v) => setAccount(index, { label: v })}
+            />
+            <InvitationField
+              label="Número"
+              value={account.value}
+              onChange={(v) => setAccount(index, { value: v })}
+            />
+            <div className="flex items-end gap-2">
+              <div className="flex-1">
+                <InvitationField
+                  label="Titular"
+                  value={account.holder}
+                  onChange={(v) => setAccount(index, { holder: v })}
+                />
+              </div>
+              <button
+                type="button"
+                className="icon-action icon-action--danger mb-1"
+                title="Borrar esta cuenta"
+                aria-label={`Borrar la cuenta ${account.bank}`}
+                onClick={() => set("giftAccounts", draft.giftAccounts.filter((_, i) => i !== index))}
+              >
+                <LuTrash2 size={16} aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+        ))}
+        <button
+          type="button"
+          className="btn-ghost justify-self-start"
+          onClick={() =>
+            set("giftAccounts", [
+              ...draft.giftAccounts,
+              { bank: "", label: "", value: "", holder: "" },
+            ])
+          }
+        >
+          Agregar cuenta
+        </button>
+        <InvitationField
+          label="Confirmar antes del"
+          value={draft.rsvpDeadline}
+          onChange={(v) => set("rsvpDeadline", v)}
+        />
+        <InvitationField
+          label="Nota de puntualidad"
+          rows={2}
+          value={draft.punctualityNote}
+          onChange={(v) => set("punctualityNote", v)}
+        />
+      </div>
+
+      {error && <p className="text-sm text-danger mb-3">{error}</p>}
+      <div className="flex items-center gap-4">
+        <button
+          type="button"
+          className="btn-primary"
+          onClick={() => {
+            setError(null);
+            void onSave(draft)
+              .then(() => setSaved(true))
+              .catch((err: unknown) => setError(errorMessage(err)));
+          }}
+        >
+          Guardar invitación
+        </button>
+        {saved && <span className="text-sm text-success">Guardado.</span>}
+      </div>
+    </section>
+  );
 }

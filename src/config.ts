@@ -35,11 +35,35 @@ export type GiftAccount = {
   holder: string;
 };
 
+/** Todo el contenido editable de la invitación. */
+export type EventConfig = {
+  couple: string;
+  signature: string;
+  tagline: string;
+  date: string;
+  shortDate: string;
+  sides: readonly InvitationSide[];
+  events: readonly EventOccurrence[];
+  dressCode: string;
+  dressCodeDescription: string;
+  dressCodeWomen: readonly string[];
+  dressCodeMen: readonly string[];
+  dressCodeAvoid: readonly string[];
+  photoUrl: string;
+  rsvpDeadline: string;
+  punctualityNote: string;
+  giftMessage: string;
+  giftAccounts: readonly GiftAccount[];
+  spotifyTrackUrl: string;
+};
+
 /**
- * Event metadata shown on the guest page. `photoUrl` is optional; when set it
- * is used as the hero background. Leave empty to fall back to a CSS-only hero.
+ * Valores por defecto de la invitación. Lo que se edite desde el admin se
+ * guarda en el Sheet y pisa estos campos uno por uno; los que nunca se
+ * tocaron siguen saliendo de acá. Sirve además como respaldo si el backend
+ * no contesta: la invitación se ve igual.
  */
-export const EVENT = {
+export const DEFAULT_EVENT: EventConfig = {
   couple: "Seba & Emi",
   /** Signature line at the foot of the page, set in the script face. */
   signature: "Seba y Emi",
@@ -52,7 +76,7 @@ export const EVENT = {
   sides: [
     { value: "seba", label: "Seba" },
     { value: "emi", label: "Emi" },
-  ] as readonly InvitationSide[],
+  ],
   /** Occurrences in chronological order. The last one is the main event. */
   events: [
     {
@@ -76,7 +100,7 @@ export const EVENT = {
       icon: "party",
       showDressCode: true,
     },
-  ] as readonly EventOccurrence[],
+  ],
   dressCode: "Formal",
   dressCodeDescription:
     "Una boda formal: es la ocasión para sacar del placard eso que casi nunca usás.",
@@ -116,10 +140,12 @@ export const EVENT = {
       value: "001404446-00003",
       holder: "Sebastián Consonni",
     },
-  ] as readonly GiftAccount[],
+  ],
   /** Con track hay portada: el click habilita el autoplay del reproductor. */
   spotifyTrackUrl: "https://open.spotify.com/track/5wq9WMmC3FzC7k1x6yVfAG",
-} as const;
+};
 
-/** The occurrence that headlines the page: the last one, i.e. the party. */
-export const MAIN_EVENT = EVENT.events[EVENT.events.length - 1];
+/** La ocurrencia que titula la página: la última, o sea la fiesta. */
+export function mainEvent(event: EventConfig): EventOccurrence | undefined {
+  return event.events[event.events.length - 1];
+}

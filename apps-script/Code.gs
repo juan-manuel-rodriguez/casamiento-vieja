@@ -33,6 +33,8 @@
 
 /** @const {string} */ var GUESTS_TAB = 'guests';
 /** @const {string} */ var SONG_RECS_TAB = 'songRecommendations';
+/** @const {string} */ var TABLES_TAB = 'tables';
+/** @const {string} */ var SETTINGS_TAB = 'settings';
 
 /**
  * Legacy tab. RSVPs used to be appended here as an append-only history; they
@@ -64,6 +66,21 @@ var GUESTS_HEADERS = [
 var SONG_RECS_HEADERS = ['timestamp', 'guestId', 'trackId', 'trackName', 'artists', 'spotifyUrl'];
 
 /**
+ * Las mesas del salón. `number` es lo que se guarda junto a cada invitado, así
+ * que renumerar mesas resienta gente en silencio: conviene borrar y crear.
+ * @const {Array<string>}
+ */
+var TABLES_HEADERS = ['number', 'seats', 'zone'];
+
+/**
+ * Contenido de la invitación, una fila por campo. Los campos que son listas
+ * (eventos, cuentas, lados, listas de vestimenta) se guardan como JSON en la
+ * celda: el admin los edita con un formulario, no a mano.
+ * @const {Array<string>}
+ */
+var SETTINGS_HEADERS = ['key', 'value'];
+
+/**
  * Key used to store the admin passphrase in PropertiesService. Set the value
  * via Project Settings → Script Properties. Storing it outside of source
  * means pasting a new version of this file does not overwrite the passphrase.
@@ -88,7 +105,7 @@ var ADMIN_PASSPHRASE_KEY = 'ADMIN_PASSPHRASE';
  * deployment" mints a second URL instead of updating the one the app calls.
  * @const {string}
  */
-var CODE_VERSION = '2026-08-11.1';
+var CODE_VERSION = '2026-08-11.2';
 
 // ---------- Public bootstrap ----------
 
@@ -104,6 +121,23 @@ function setup() {
   dropLegacyRsvpsSheet_();
   ensureTextColumns_();
   ensureSheetWithHeaders_(SONG_RECS_TAB, SONG_RECS_HEADERS);
+  ensureSheetWithHeaders_(TABLES_TAB, TABLES_HEADERS);
+  ensureSheetWithHeaders_(SETTINGS_TAB, SETTINGS_HEADERS);
+  ensureSettingsTextColumn_();
+}
+
+/**
+ * La columna `value` de settings guarda JSON, que empieza con "[" o "{". Sin
+ * formato de texto plano, Sheets intenta interpretar algunos valores y los
+ * rompe. Mismo criterio que ensureTextColumns_ en la pestaña de invitados.
+ */
+function ensureSettingsTextColumn_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SETTINGS_TAB);
+  if (!sheet) return;
+  if (sheet.getRange(2, 2).getNumberFormat() === '@') return;
+  var rowCount = sheet.getMaxRows() - 1;
+  if (rowCount < 1) return;
+  sheet.getRange(2, 1, rowCount, 2).setNumberFormat('@');
 }
 
 /**
@@ -312,6 +346,25 @@ var HANDLERS_ = {
   getGuest: function (params) {
     return handleGetGuest_(params);
   },
+  getSettings: function () {
+    return { settings: readSettings_() };
+  },
+  listTables: function (params) {
+    requireAdmin_(params);
+    return { tables: readTables_() };
+  },
+  saveTables: function (params) {
+    requireAdmin_(params);
+    return handleSaveTables_(params);
+  },
+  saveSettings: function (params) {
+    requireAdmin_(params);
+    return handleSaveSettings_(params);
+  },
+  deleteSongRecommendation: function (params) {
+    requireAdmin_(params);
+    return handleDeleteSongRecommendation_(params);
+  },
   submitRsvp: function (params) {
     return handleSubmitRsvp_(params);
   },
@@ -479,9 +532,10 @@ function getSpotifyToken_() {
 function handleGetGuest_(params) {
   var id = requireString_(params, 'id');
   var guest = findGuestById_(id);
-  if (!guest) return { found: false };
+  if (!guest) return { found: false, settings: readSettings_() };
   return {
     found: true,
+    settings: readSettings_(),
     guest: {
       id: guest.id,
       name: guest.name,
@@ -693,6 +747,141 @@ function handleDeleteGuest_(params) {
   });
 }
 
+
+/**
+ * Reemplaza la lista completa de mesas. Se pisa entera en vez de hacer CRUD
+ * fila por fila: el admin edita una lista y la guarda, y así la escritura es
+ * atómica y no quedan huecos si algo falla en el medio.
+ * @param {Object} params
+ * @returns {{ok: true, count: number}}
+ */
+function handleSaveTables_(params) {
+  var input = params.tables;
+  if (!Array.isArray(input)) throw new Error('missing field: tables');
+
+  var seen = {};
+  var rows = input.map(function (t) {
+    var number = Math.round(Number(t.number));
+    if (!isFinite(number) || number < 1) throw new Error('número de mesa inválido: ' + t.number);
+    if (seen[number]) throw new Error('mesa repetida: ' + number);
+    seen[number] = true;
+    var seats = Math.round(Number(t.seats));
+    if (!isFinite(seats) || seats < 1) throw new Error('lugares inválidos en la mesa ' + number);
+    return [number, seats, t.zone == null ? '' : String(t.zone).trim()];
+  });
+  rows.sort(function (a, b) { return a[0] - b[0]; });
+
+  return withWriteLock_(function () {
+    var sheet = sheetByName_(TABLES_TAB);
+    var lastRow = sheet.getLastRow();
+    if (lastRow >= 2) sheet.getRange(2, 1, lastRow - 1, TABLES_HEADERS.length).clearContent();
+    if (rows.length > 0) sheet.getRange(2, 1, rows.length, TABLES_HEADERS.length).setValues(rows);
+    return { ok: true, count: rows.length };
+  });
+}
+
+/**
+ * @typedef {{number: number, seats: number, zone: string}} VenueTable
+ * @returns {Array<VenueTable>}
+ */
+function readTables_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TABLES_TAB);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  var values = sheet.getRange(2, 1, sheet.getLastRow() - 1, TABLES_HEADERS.length).getValues();
+  var out = [];
+  for (var i = 0; i < values.length; i++) {
+    var number = Number(values[i][0]);
+    if (!number) continue;
+    out.push({
+      number: number,
+      seats: Math.max(1, Number(values[i][1] || 1)),
+      zone: String(values[i][2] || ''),
+    });
+  }
+  out.sort(function (a, b) { return a.number - b.number; });
+  return out;
+}
+
+/**
+ * Contenido de la invitación como objeto. Los valores que arrancan con "[" o
+ * "{" se parsean como JSON; el resto viaja como texto. Si un JSON quedó roto
+ * por una edición a mano en el Sheet, se devuelve el texto crudo en lugar de
+ * tirar toda la respuesta abajo.
+ * @returns {Object<string, *>}
+ */
+function readSettings_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SETTINGS_TAB);
+  if (!sheet || sheet.getLastRow() < 2) return {};
+  var values = sheet.getRange(2, 1, sheet.getLastRow() - 1, SETTINGS_HEADERS.length).getValues();
+  var out = {};
+  for (var i = 0; i < values.length; i++) {
+    var key = String(values[i][0] || '').trim();
+    if (!key) continue;
+    var raw = values[i][1];
+    var text = raw == null ? '' : String(raw);
+    var head = text.charAt(0);
+    if (head === '[' || head === '{') {
+      try {
+        out[key] = JSON.parse(text);
+        continue;
+      } catch (err) {
+        // JSON roto a mano en el Sheet: mejor devolver el texto que romper todo.
+      }
+    }
+    out[key] = text;
+  }
+  return out;
+}
+
+/**
+ * Reemplaza el contenido de la invitación. Recibe el objeto entero, no un
+ * campo suelto, así el Sheet nunca queda con una mezcla de dos versiones.
+ * @param {Object} params
+ * @returns {{ok: true, count: number}}
+ */
+function handleSaveSettings_(params) {
+  var input = params.settings;
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('missing field: settings');
+  }
+  var rows = [];
+  for (var key in input) {
+    if (!Object.prototype.hasOwnProperty.call(input, key)) continue;
+    var value = input[key];
+    rows.push([key, value === null || value === undefined
+      ? ''
+      : (typeof value === 'object' ? JSON.stringify(value) : String(value))]);
+  }
+
+  return withWriteLock_(function () {
+    var sheet = sheetByName_(SETTINGS_TAB);
+    var lastRow = sheet.getLastRow();
+    if (lastRow >= 2) sheet.getRange(2, 1, lastRow - 1, SETTINGS_HEADERS.length).clearContent();
+    if (rows.length > 0) {
+      sheet.getRange(2, 1, rows.length, SETTINGS_HEADERS.length).setValues(rows);
+      sheet.getRange(2, 1, rows.length, SETTINGS_HEADERS.length).setNumberFormat('@');
+    }
+    return { ok: true, count: rows.length };
+  });
+}
+
+/**
+ * Borra una recomendación por su fila. Hace falta para limpiar las que quedan
+ * huérfanas cuando se borra al invitado que las mandó.
+ * @param {Object} params
+ * @returns {{ok: true, deleted: boolean}}
+ */
+function handleDeleteSongRecommendation_(params) {
+  var rowIndex = Math.round(Number(params.rowIndex));
+  if (!isFinite(rowIndex) || rowIndex < 2) throw new Error('fila inválida: ' + params.rowIndex);
+  return withWriteLock_(function () {
+    var sheet = sheetByName_(SONG_RECS_TAB);
+    if (rowIndex > sheet.getLastRow()) return { ok: true, deleted: false };
+    sheet.deleteRow(rowIndex);
+    return { ok: true, deleted: true };
+  });
+}
+
 // ---------- IO helpers ----------
 
 /**
@@ -768,9 +957,10 @@ function readSongRecommendations_() {
  * @param {Array<*>} row
  * @returns {SongRec}
  */
-function mapSongRecRow_(row) {
+function mapSongRecRow_(row, rowIndex) {
   var ts = row[0];
   return {
+    rowIndex: rowIndex,
     timestamp: ts instanceof Date ? ts.toISOString() : String(ts || ''),
     guestId: String(row[1] || ''),
     trackId: String(row[2] || ''),

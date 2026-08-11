@@ -11,6 +11,8 @@ export type SpotifyTrack = {
 };
 
 export type SongRecommendation = {
+  /** Fila en la planilla. Hace falta para poder borrarla. */
+  rowIndex: number;
   timestamp: string;
   guestId: string;
   trackId: string;
@@ -50,4 +52,16 @@ export async function listSongRecommendations(
     auth,
   });
   return response.recommendations;
+}
+
+/**
+ * Borra una recomendación. Sirve sobre todo para las que quedan huérfanas
+ * cuando se borra al invitado que las mandó.
+ */
+export async function deleteSongRecommendation(auth: string, rowIndex: number): Promise<void> {
+  await postJson<{ ok: true; deleted: boolean }>({
+    action: "deleteSongRecommendation",
+    auth,
+    rowIndex,
+  });
 }

@@ -7,7 +7,8 @@ import {
   submitSongRecommendation,
   type SpotifyTrack,
 } from "../api/songs";
-import { EVENT, type EventOccurrence } from "../config";
+import { type EventOccurrence } from "../config";
+import { getEvent, useEvent } from "../lib/event";
 import { LaurelBranch } from "../components/LaurelBranch";
 import { shouldRestartClip, type PlaybackState } from "../lib/playback";
 
@@ -20,6 +21,7 @@ type ViewState =
 
 export function GuestPage() {
   const [searchParams] = useSearchParams();
+  const invitation = useEvent();
   const id = searchParams.get("id") ?? "";
   const isDemo = searchParams.has("demo");
 
@@ -33,7 +35,10 @@ export function GuestPage() {
       : { kind: "not-found" };
 
   const trackId = useMemo(
-    () => (EVENT.spotifyTrackUrl ? extractSpotifyTrackId(EVENT.spotifyTrackUrl) : null),
+    () => {
+      const url = getEvent().spotifyTrackUrl;
+      return url ? extractSpotifyTrackId(url) : null;
+    },
     [],
   );
 
@@ -159,7 +164,7 @@ export function GuestPage() {
         <div className="flex items-stretch justify-center gap-3 max-w-md mx-auto">
           <LaurelBranch side="left" className="text-brass/65" />
           <p className="font-script text-[clamp(2rem,8vw,3.4rem)] leading-none text-ink m-0 pb-1">
-            {EVENT.signature}
+            {invitation.signature}
           </p>
           <LaurelBranch side="right" className="text-brass/65" />
         </div>
@@ -170,6 +175,7 @@ export function GuestPage() {
 }
 
 function CoverScreen({ onEnter }: { onEnter: () => void }) {
+  const invitation = useEvent();
   return (
     <div
       className="fixed inset-0 z-40 flex flex-col items-center justify-center text-center px-6 animate-[fade-in_300ms_ease]"
@@ -187,13 +193,13 @@ function CoverScreen({ onEnter }: { onEnter: () => void }) {
           <LaurelBranch side="right" className="text-brass/70" />
         </div>
         <p className="mt-3 font-display text-[clamp(1rem,4.2vw,1.5rem)] leading-snug text-ink/85 text-balance m-0">
-          {EVENT.tagline}{" "}
+          {invitation.tagline}{" "}
           <HeartGlyph className="inline w-[0.7em] h-[0.7em] align-baseline text-brass" />
         </p>
       </div>
       <HeartDivider className="my-9 w-56 max-w-[70vw]" />
       <p className="font-script text-[clamp(2rem,8vw,2.8rem)] leading-none text-ink m-0 mb-10 pb-1">
-        {EVENT.signature}
+        {invitation.signature}
       </p>
       <button type="button" onClick={onEnter} className="btn-primary">
         Ver invitación
@@ -206,15 +212,16 @@ function CoverScreen({ onEnter }: { onEnter: () => void }) {
 /* ---------- Sections ---------- */
 
 function Hero() {
+  const invitation = useEvent();
   return (
     <header className="relative isolate">
-      {EVENT.photoUrl && (
+      {invitation.photoUrl && (
         /* La foto es vertical. A sangre completa en una pantalla ancha habría
            que agrandarla tanto que solo entraría una franja: por eso arriba de
            lg se le pone tope de ancho y se funde también por los costados. */
         <div className="relative mx-auto w-full lg:max-w-3xl h-[clamp(320px,60vh,640px)] overflow-hidden">
           <img
-            src={EVENT.photoUrl}
+            src={invitation.photoUrl}
             alt=""
             className="absolute inset-0 w-full h-full object-cover saturate-[0.92]"
             style={{ objectPosition: "50% 22%" }}
@@ -235,7 +242,7 @@ function Hero() {
             <LaurelBranch side="right" className="text-brass/70" />
           </div>
           <p className="mt-3 font-display text-[clamp(1.05rem,4.4vw,1.7rem)] leading-snug text-ink/85 text-balance m-0">
-            {EVENT.tagline}{" "}
+            {invitation.tagline}{" "}
             <HeartGlyph className="inline w-[0.7em] h-[0.7em] align-baseline text-brass" />
           </p>
         </div>
@@ -263,11 +270,12 @@ function HeartDivider({ className }: { className?: string }) {
 }
 
 function EventDetails() {
+  const invitation = useEvent();
   return (
     <Section wide>
       <HeartDivider className="mb-10" />
       <div className="grid grid-cols-1 sm:grid-cols-2">
-        {EVENT.events.map((occurrence, i) => (
+        {invitation.events.map((occurrence, i) => (
           <div
             key={occurrence.label}
             className={
@@ -280,11 +288,11 @@ function EventDetails() {
           </div>
         ))}
       </div>
-      {EVENT.punctualityNote && (
+      {invitation.punctualityNote && (
         <>
           <HeartDivider />
           <p className="font-display text-xl sm:text-2xl leading-snug text-ink/85 max-w-lg mx-auto m-0">
-            {EVENT.punctualityNote}
+            {invitation.punctualityNote}
           </p>
         </>
       )}
@@ -294,7 +302,7 @@ function EventDetails() {
         <p className="font-display text-lg sm:text-xl leading-snug text-ink m-0 text-left">
           No te olvides de confirmar asistencia
           <br />
-          antes del {EVENT.rsvpDeadline}
+          antes del {invitation.rsvpDeadline}
         </p>
       </div>
     </Section>
@@ -354,6 +362,7 @@ function EventRow({ icon, children }: { icon: React.ReactNode; children: React.R
 }
 
 function GiftAccountSection() {
+  const invitation = useEvent();
   return (
     <Section wide>
       <div className="rounded-2xl border border-brass/40 px-6 py-10 sm:px-12">
@@ -363,9 +372,9 @@ function GiftAccountSection() {
             Sugerencia de regalo
           </h2>
         </div>
-        <p className="text-muted max-w-prose mx-auto mb-9">{EVENT.giftMessage}</p>
+        <p className="text-muted max-w-prose mx-auto mb-9">{invitation.giftMessage}</p>
         <div className="grid grid-cols-1 sm:grid-cols-2">
-          {EVENT.giftAccounts.map((account, i) => (
+          {invitation.giftAccounts.map((account, i) => (
             <div
               key={account.value}
               className={
@@ -765,11 +774,12 @@ function ThankYouState({ response }: { response: RsvpResponse }) {
 }
 
 function DressCodeRow() {
+  const invitation = useEvent();
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const women: readonly string[] = EVENT.dressCodeWomen ?? [];
-  const men: readonly string[] = EVENT.dressCodeMen ?? [];
-  const avoid: readonly string[] = EVENT.dressCodeAvoid ?? [];
-  const description = EVENT.dressCodeDescription ?? "";
+  const women: readonly string[] = invitation.dressCodeWomen ?? [];
+  const men: readonly string[] = invitation.dressCodeMen ?? [];
+  const avoid: readonly string[] = invitation.dressCodeAvoid ?? [];
+  const description = invitation.dressCodeDescription ?? "";
   const hasDetails =
     description.length > 0 || women.length > 0 || men.length > 0 || avoid.length > 0;
 
@@ -783,7 +793,7 @@ function DressCodeRow() {
   return (
     <>
       <EventRow icon={<HangerIcon className="w-5 h-5" />}>
-        Vestimenta {EVENT.dressCode}
+        Vestimenta {invitation.dressCode}
         {hasDetails && (
           <button
             type="button"
@@ -809,7 +819,7 @@ function DressCodeRow() {
                 Dress code
               </span>
               <h3 className="font-display italic text-3xl m-0 text-ink mt-1">
-                {EVENT.dressCode}
+                {invitation.dressCode}
               </h3>
             </div>
             <button
