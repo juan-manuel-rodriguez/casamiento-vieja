@@ -76,7 +76,7 @@ export function GuestPage() {
     script.src = "https://open.spotify.com/embed/iframe-api/v1";
     script.async = true;
     document.body.appendChild(script);
-  }, [trackId]);
+  }, [trackId, ownAudio]);
 
   useEffect(() => {
     if (!id || isDemo) return;
