@@ -8,6 +8,7 @@ import {
   type SpotifyTrack,
 } from "../api/songs";
 import { EVENT, type EventOccurrence } from "../config";
+import { LaurelBranch } from "../components/LaurelBranch";
 
 type ViewState =
   | { kind: "loading" }
@@ -154,9 +155,9 @@ export function GuestPage() {
       </main>
       <footer className="px-6 pt-4 pb-14 text-center">
         <HeartDivider />
-        <div className="relative max-w-md mx-auto px-12">
-          <LaurelBranch className="absolute left-0 bottom-0 w-7 text-brass/70" />
-          <LaurelBranch className="absolute right-0 bottom-0 w-7 text-brass/70 -scale-x-100" />
+        <div className="relative max-w-md mx-auto px-16">
+          <LaurelBranch className="absolute left-0 bottom-0 w-12 h-15 text-brass/65" />
+          <LaurelBranch className="absolute right-0 bottom-0 w-12 h-15 text-brass/65 -scale-x-100" />
           <p className="font-script text-[clamp(2.2rem,9vw,3.4rem)] leading-none text-ink m-0 pb-1">
             {EVENT.signature}
           </p>
@@ -176,9 +177,9 @@ function CoverScreen({ onEnter }: { onEnter: () => void }) {
           "radial-gradient(ellipse at 20% 0%, rgba(234,217,184,0.85) 0%, transparent 55%), radial-gradient(ellipse at 80% 100%, rgba(234,217,184,0.6) 0%, transparent 60%), linear-gradient(180deg, #f8f3ea 0%, #f1ebdd 100%)",
       }}
     >
-      <div className="relative w-full max-w-lg px-12 sm:px-16">
-        <LaurelBranch className="absolute left-0 top-1/2 -translate-y-1/2 w-9 sm:w-12 text-brass/75" />
-        <LaurelBranch className="absolute right-0 top-1/2 -translate-y-1/2 w-9 sm:w-12 text-brass/75 -scale-x-100" />
+      <div className="relative w-full max-w-lg px-16 sm:px-24">
+        <LaurelBranch className="absolute left-0 top-1/2 -translate-y-1/2 w-14 h-18 sm:w-20 sm:h-25 text-brass/70" />
+        <LaurelBranch className="absolute right-0 top-1/2 -translate-y-1/2 w-14 h-18 sm:w-20 sm:h-25 text-brass/70 -scale-x-100" />
         <h1 className="font-display font-normal uppercase text-brass text-[clamp(2.4rem,11vw,5rem)] leading-[0.95] m-0">
           Nos casamos
         </h1>
@@ -217,9 +218,9 @@ function Hero() {
         </div>
       )}
       <div className="relative text-center px-6 pt-6 pb-12">
-        <div className="relative max-w-3xl mx-auto px-11 sm:px-20">
-          <LaurelBranch className="absolute left-0 top-1/2 -translate-y-1/2 w-10 sm:w-14 text-brass/75" />
-          <LaurelBranch className="absolute right-0 top-1/2 -translate-y-1/2 w-10 sm:w-14 text-brass/75 -scale-x-100" />
+        <div className="relative max-w-3xl mx-auto px-18 sm:px-32">
+          <LaurelBranch className="absolute left-0 top-1/2 -translate-y-1/2 w-16 h-20 sm:w-24 sm:h-30 text-brass/70" />
+          <LaurelBranch className="absolute right-0 top-1/2 -translate-y-1/2 w-16 h-20 sm:w-24 sm:h-30 text-brass/70 -scale-x-100" />
           <h1 className="font-display font-normal uppercase text-brass text-[clamp(2.5rem,11.5vw,5.5rem)] leading-[0.95] tracking-[0.01em] m-0">
             Nos casamos
           </h1>
@@ -237,73 +238,6 @@ function Hero() {
  * Rama de laurel de las esquinas. Las hojas se generan sobre el tallo en vez
  * de dibujarse a mano para que queden parejas y sea fácil cambiar el largo.
  */
-/** Puntos de control del tallo, en coordenadas del viewBox. */
-const STEM = [
-  [46, 134],
-  [30, 104],
-  [23, 60],
-  [30, 7],
-] as const;
-
-/** Hoja de laurel: puntiaguda en las dos puntas, apoyada en el origen. */
-const LEAF_PATH = "M0 0C6.2-6.2 14.9-7.2 24 0 14.9 7.2 6.2 6.2 0 0Z";
-
-/** Apertura de la hoja respecto de la tangente del tallo, en grados. */
-const LEAF_SPREAD = 55;
-
-function stemPoint(t: number): [number, number] {
-  const u = 1 - t;
-  const w = [u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t];
-  return [
-    w[0] * STEM[0][0] + w[1] * STEM[1][0] + w[2] * STEM[2][0] + w[3] * STEM[3][0],
-    w[0] * STEM[0][1] + w[1] * STEM[1][1] + w[2] * STEM[2][1] + w[3] * STEM[3][1],
-  ];
-}
-
-/** Ángulo de la tangente al tallo, en grados, apuntando hacia la punta. */
-function stemAngle(t: number): number {
-  const u = 1 - t;
-  const dx =
-    3 * u * u * (STEM[1][0] - STEM[0][0]) +
-    6 * u * t * (STEM[2][0] - STEM[1][0]) +
-    3 * t * t * (STEM[3][0] - STEM[2][0]);
-  const dy =
-    3 * u * u * (STEM[1][1] - STEM[0][1]) +
-    6 * u * t * (STEM[2][1] - STEM[1][1]) +
-    3 * t * t * (STEM[3][1] - STEM[2][1]);
-  return (Math.atan2(dy, dx) * 180) / Math.PI;
-}
-
-/**
- * Media corona de laurel. Las hojas se apoyan sobre la curva del tallo
- * siguiendo su tangente, así ninguna queda cruzada ni flotando, y encogen
- * hacia la punta como en la rama real.
- */
-function LaurelBranch({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 76 140" className={className} fill="currentColor" aria-hidden="true">
-      <path
-        d={`M${STEM[0][0]} ${STEM[0][1]}C${STEM[1][0]} ${STEM[1][1]} ${STEM[2][0]} ${STEM[2][1]} ${STEM[3][0]} ${STEM[3][1]}`}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.4"
-        strokeLinecap="round"
-      />
-      {[0.05, 0.23, 0.41, 0.59, 0.77, 0.95].map((t) => {
-        const [x, y] = stemPoint(t);
-        const angle = stemAngle(t);
-        const scale = 1 - t * 0.35;
-        return (
-          <g key={t} transform={`translate(${x} ${y})`}>
-            <path d={LEAF_PATH} transform={`rotate(${angle - LEAF_SPREAD}) scale(${scale})`} />
-            <path d={LEAF_PATH} transform={`rotate(${angle + LEAF_SPREAD}) scale(${scale})`} />
-          </g>
-        );
-      })}
-    </svg>
-  );
-}
-
 /** Filete · corazón · filete. Es el separador que usa la invitación impresa. */
 function HeartDivider({ className }: { className?: string }) {
   return (
