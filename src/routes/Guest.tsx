@@ -155,12 +155,12 @@ export function GuestPage() {
       </main>
       <footer className="px-6 pt-4 pb-14 text-center">
         <HeartDivider />
-        <div className="relative max-w-md mx-auto px-16">
-          <LaurelBranch side="left" className="absolute left-0 bottom-0 w-10 h-17 text-brass/65" />
-          <LaurelBranch side="right" className="absolute right-0 bottom-0 w-10 h-17 text-brass/65" />
-          <p className="font-script text-[clamp(2.2rem,9vw,3.4rem)] leading-none text-ink m-0 pb-1">
+        <div className="flex items-stretch justify-center gap-3 max-w-md mx-auto">
+          <LaurelBranch side="left" className="text-brass/65" />
+          <p className="font-script text-[clamp(2rem,8vw,3.4rem)] leading-none text-ink m-0 pb-1">
             {EVENT.signature}
           </p>
+          <LaurelBranch side="right" className="text-brass/65" />
         </div>
       </footer>
       {!entered && <CoverScreen onEnter={handleEnter} />}
@@ -177,12 +177,14 @@ function CoverScreen({ onEnter }: { onEnter: () => void }) {
           "radial-gradient(ellipse at 20% 0%, rgba(234,217,184,0.85) 0%, transparent 55%), radial-gradient(ellipse at 80% 100%, rgba(234,217,184,0.6) 0%, transparent 60%), linear-gradient(180deg, #f8f3ea 0%, #f1ebdd 100%)",
       }}
     >
-      <div className="relative w-full max-w-lg px-16 sm:px-24">
-        <LaurelBranch side="left" className="absolute left-0 top-1/2 -translate-y-1/2 w-12 h-20 sm:w-16 sm:h-28 text-brass/70" />
-        <LaurelBranch side="right" className="absolute right-0 top-1/2 -translate-y-1/2 w-12 h-20 sm:w-16 sm:h-28 text-brass/70" />
-        <h1 className="font-display font-normal uppercase text-brass text-[clamp(2.4rem,11vw,5rem)] leading-[0.95] m-0">
-          Nos casamos
-        </h1>
+      <div className="w-full max-w-lg">
+        <div className="flex items-stretch justify-center gap-3 sm:gap-5">
+          <LaurelBranch side="left" className="text-brass/70" />
+          <h1 className="font-display font-normal uppercase text-brass text-[clamp(1.9rem,8.5vw,4.4rem)] leading-[0.95] m-0">
+            Nos casamos
+          </h1>
+          <LaurelBranch side="right" className="text-brass/70" />
+        </div>
         <p className="mt-3 font-display text-[clamp(1rem,4.2vw,1.5rem)] leading-snug text-ink/85 text-balance m-0">
           {EVENT.tagline}{" "}
           <HeartGlyph className="inline w-[0.7em] h-[0.7em] align-baseline text-brass" />
@@ -218,12 +220,14 @@ function Hero() {
         </div>
       )}
       <div className="relative text-center px-6 pt-6 pb-12">
-        <div className="relative max-w-3xl mx-auto px-18 sm:px-32">
-          <LaurelBranch side="left" className="absolute left-0 top-1/2 -translate-y-1/2 w-14 h-24 sm:w-20 sm:h-34 text-brass/70" />
-          <LaurelBranch side="right" className="absolute right-0 top-1/2 -translate-y-1/2 w-14 h-24 sm:w-20 sm:h-34 text-brass/70" />
-          <h1 className="font-display font-normal uppercase text-brass text-[clamp(2.5rem,11.5vw,5.5rem)] leading-[0.95] tracking-[0.01em] m-0">
-            Nos casamos
-          </h1>
+        <div className="max-w-3xl mx-auto">
+          <div className="flex items-stretch justify-center gap-3 sm:gap-6">
+            <LaurelBranch side="left" className="text-brass/70" />
+            <h1 className="font-display font-normal uppercase text-brass text-[clamp(2rem,9vw,5.5rem)] leading-[0.95] tracking-[0.01em] m-0">
+              Nos casamos
+            </h1>
+            <LaurelBranch side="right" className="text-brass/70" />
+          </div>
           <p className="mt-3 font-display text-[clamp(1.05rem,4.4vw,1.7rem)] leading-snug text-ink/85 text-balance m-0">
             {EVENT.tagline}{" "}
             <HeartGlyph className="inline w-[0.7em] h-[0.7em] align-baseline text-brass" />
