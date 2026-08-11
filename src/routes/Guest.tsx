@@ -42,12 +42,12 @@ export function GuestPage() {
     [],
   );
 
-  // El audio propio manda sobre Spotify: suena entero, desde el principio y
-  // es lo único que se reproduce solo tras el click de la portada.
+  // El audio propio manda sobre Spotify: suena entero y desde el principio.
   const ownAudio = invitation.audioUrl;
+  const hasAudio = Boolean(ownAudio) || Boolean(trackId);
 
   const [view, setView] = useState<ViewState>(initialView);
-  const [entered, setEntered] = useState(isDemo || !ownAudio);
+  const [entered, setEntered] = useState(isDemo || !hasAudio);
   const playerRef = useRef<{ play: () => void } | null>(null);
   const [adultsConfirmed, setAdultsConfirmed] = useState(
     initialView.kind === "ready" ? initialView.guest.adultSlots : 1,
