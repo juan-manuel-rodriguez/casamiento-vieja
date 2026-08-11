@@ -8,7 +8,6 @@ import {
   type SpotifyTrack,
 } from "../api/songs";
 import { EVENT, type EventOccurrence } from "../config";
-import { firstName } from "../lib/names";
 
 type ViewState =
   | { kind: "loading" }
@@ -118,14 +117,12 @@ export function GuestPage() {
             <p>Revisá el link que te mandamos o contactanos para que te enviemos uno nuevo.</p>
           </StatusBlock>
         )}
-        {/* The greeting renders only when guest data is loaded. The
-            SpotifyPlayer is only rendered while we have a real guest to
+        {/* The SpotifyPlayer is only rendered while we have a real guest to
             entertain (loading or ready): on "sent" the embed flips to a
             "Listen on Spotify" upsell, and on "not-found" or "error" the
             music feels out of place. Mounting it during "loading" keeps
             the iframe and IFrame API controller ready by the time the
             cover is dismissed. */}
-        {view.kind === "ready" && <Greeting name={view.guest.name} />}
         {trackId && (view.kind === "loading" || view.kind === "ready") && (
           <SpotifyPlayer trackId={trackId} playerRef={playerRef} />
         )}
@@ -292,21 +289,6 @@ function HeartDivider({ className }: { className?: string }) {
       <HeartGlyph className="w-3.5 h-3.5 text-brass shrink-0" />
       <span className="h-px flex-1 max-w-36 bg-current" />
     </div>
-  );
-}
-
-function Greeting({ name }: { name: string }) {
-  return (
-    <Section>
-      <Eyebrow>Bienvenida / Bienvenido</Eyebrow>
-      <h2 className="font-script text-[clamp(2.2rem,8vw,3rem)] leading-none m-0 mb-5 pb-1">
-        Hola, <span className="text-brass">{firstName(name)}</span>
-      </h2>
-      <p className="text-muted max-w-prose mx-auto">
-        Queremos compartir con vos uno de los días más importantes de nuestra vida. Esperamos que
-        puedas acompañarnos para celebrarlo juntos.
-      </p>
-    </Section>
   );
 }
 
