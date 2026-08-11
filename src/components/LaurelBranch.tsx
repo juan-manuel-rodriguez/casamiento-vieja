@@ -1,36 +1,37 @@
 /**
  * Ornamento de laurel de los laterales.
  *
- * El dibujo NO vive acá: vive en `public/laurel.svg`. Para cambiarlo, pisá
- * ese archivo con el SVG que quieras y listo, no hace falta tocar código.
+ * El dibujo NO vive acá: vive en `public/laurel-left.svg` y
+ * `public/laurel-right.svg`. Para cambiarlo, pisá esos archivos y listo.
  *
- * El SVG se usa como máscara, no como imagen, así que sus colores internos
- * son irrelevantes: solo importa la silueta, y el color sale de la clase de
- * Tailwind (`text-brass/70`). Se escala con `contain`, o sea que cualquier
- * relación de aspecto entra en la caja sin deformarse.
+ * Son las dos mitades reales de la corona, no una espejada, así que las
+ * hojas caen distinto de cada lado como en el original.
  *
- * La rama tiene que abrir hacia la derecha: el lado opuesto se espeja con
- * `-scale-x-100` en el punto de uso.
- *
- * El archivo actual es "Laurel-left.svg" de Leki, CC0 1.0 (dominio público):
- * https://commons.wikimedia.org/wiki/File:Laurel-left.svg
+ * El SVG se usa como máscara y no como imagen: sus colores internos son
+ * irrelevantes, la silueta se tiñe con la clase de Tailwind del punto de uso
+ * (`text-brass/70`) y se escala con `contain`, así que entra cualquier
+ * relación de aspecto sin deformarse.
  */
-const MASK = {
-  WebkitMaskImage: "url(/laurel.svg)",
-  maskImage: "url(/laurel.svg)",
-  WebkitMaskRepeat: "no-repeat",
-  maskRepeat: "no-repeat",
-  WebkitMaskPosition: "center",
-  maskPosition: "center",
-  WebkitMaskSize: "contain",
-  maskSize: "contain",
-} as const;
-
-export function LaurelBranch({ className }: { className?: string }) {
+export function LaurelBranch({
+  side,
+  className,
+}: {
+  side: "left" | "right";
+  className?: string;
+}) {
   return (
     <span
       className={`block bg-current ${className ?? ""}`}
-      style={MASK}
+      style={{
+        WebkitMaskImage: `url(/laurel-${side}.svg)`,
+        maskImage: `url(/laurel-${side}.svg)`,
+        WebkitMaskRepeat: "no-repeat",
+        maskRepeat: "no-repeat",
+        WebkitMaskPosition: "center",
+        maskPosition: "center",
+        WebkitMaskSize: "contain",
+        maskSize: "contain",
+      }}
       aria-hidden="true"
     />
   );

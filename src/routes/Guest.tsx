@@ -156,8 +156,8 @@ export function GuestPage() {
       <footer className="px-6 pt-4 pb-14 text-center">
         <HeartDivider />
         <div className="relative max-w-md mx-auto px-16">
-          <LaurelBranch className="absolute left-0 bottom-0 w-12 h-15 text-brass/65" />
-          <LaurelBranch className="absolute right-0 bottom-0 w-12 h-15 text-brass/65 -scale-x-100" />
+          <LaurelBranch side="left" className="absolute left-0 bottom-0 w-10 h-17 text-brass/65" />
+          <LaurelBranch side="right" className="absolute right-0 bottom-0 w-10 h-17 text-brass/65" />
           <p className="font-script text-[clamp(2.2rem,9vw,3.4rem)] leading-none text-ink m-0 pb-1">
             {EVENT.signature}
           </p>
@@ -178,8 +178,8 @@ function CoverScreen({ onEnter }: { onEnter: () => void }) {
       }}
     >
       <div className="relative w-full max-w-lg px-16 sm:px-24">
-        <LaurelBranch className="absolute left-0 top-1/2 -translate-y-1/2 w-14 h-18 sm:w-20 sm:h-25 text-brass/70" />
-        <LaurelBranch className="absolute right-0 top-1/2 -translate-y-1/2 w-14 h-18 sm:w-20 sm:h-25 text-brass/70 -scale-x-100" />
+        <LaurelBranch side="left" className="absolute left-0 top-1/2 -translate-y-1/2 w-12 h-20 sm:w-16 sm:h-28 text-brass/70" />
+        <LaurelBranch side="right" className="absolute right-0 top-1/2 -translate-y-1/2 w-12 h-20 sm:w-16 sm:h-28 text-brass/70" />
         <h1 className="font-display font-normal uppercase text-brass text-[clamp(2.4rem,11vw,5rem)] leading-[0.95] m-0">
           Nos casamos
         </h1>
@@ -219,8 +219,8 @@ function Hero() {
       )}
       <div className="relative text-center px-6 pt-6 pb-12">
         <div className="relative max-w-3xl mx-auto px-18 sm:px-32">
-          <LaurelBranch className="absolute left-0 top-1/2 -translate-y-1/2 w-16 h-20 sm:w-24 sm:h-30 text-brass/70" />
-          <LaurelBranch className="absolute right-0 top-1/2 -translate-y-1/2 w-16 h-20 sm:w-24 sm:h-30 text-brass/70 -scale-x-100" />
+          <LaurelBranch side="left" className="absolute left-0 top-1/2 -translate-y-1/2 w-14 h-24 sm:w-20 sm:h-34 text-brass/70" />
+          <LaurelBranch side="right" className="absolute right-0 top-1/2 -translate-y-1/2 w-14 h-24 sm:w-20 sm:h-34 text-brass/70" />
           <h1 className="font-display font-normal uppercase text-brass text-[clamp(2.5rem,11.5vw,5.5rem)] leading-[0.95] tracking-[0.01em] m-0">
             Nos casamos
           </h1>
