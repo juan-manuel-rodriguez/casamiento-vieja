@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { FaSpotify, FaWhatsapp } from "react-icons/fa6";
-import { LuLink, LuTrash2 } from "react-icons/lu";
+import { LuLink, LuPencil, LuTrash2 } from "react-icons/lu";
 import {
   checkAuth,
   listGuests,
@@ -111,6 +111,9 @@ export function AdminPage() {
     auth ? { kind: "loading" } : { kind: "needs-passphrase" },
   );
   const [draft, setDraft] = useState<NewGuestDraft>(EMPTY_DRAFT);
+  /** Id del invitado que se está editando; null cuando el formulario da de alta. */
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [tab, setTab] = useState<TabId>("guests");
@@ -235,16 +238,52 @@ export function AdminPage() {
     });
   }
 
+  /**
+   * Carga un invitado en el formulario para editarlo. El formulario de alta y
+   * el de edición son el mismo: lo único que cambia es si viaja el id, y si
+   * viaja, el backend actualiza la fila en vez de crear una.
+   */
+  function startEditing(guest: Guest) {
+    setEditingId(guest.id);
+    setDraft({
+      name: guest.name,
+      adultSlots: guest.adultSlots,
+      kidSlots: guest.kidSlots,
+      side: guest.side,
+      table: guest.table,
+      contact: guest.contact,
+      notes: guest.notes,
+    });
+    setFormOpen(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function cancelEditing() {
+    setEditingId(null);
+    setDraft(EMPTY_DRAFT);
+  }
+
   async function handleSubmitDraft(event: React.FormEvent) {
     event.preventDefault();
     if (!auth) return;
     const name = draft.name.trim();
     if (!name) return;
+    // Al editar hay que conservar lo que el formulario no toca: si ya
+    // respondió, el backend preserva la respuesta, pero "invitación enviada"
+    // llega desde acá y mandarlo en false la desmarcaría sin querer.
+    const existing = editingId ? guests.find((g) => g.id === editingId) : undefined;
     setSaving(true);
     await withBusy(async () => {
       try {
-        await upsertGuest(auth, { ...draft, name, invitationSent: false });
+        await upsertGuest(auth, {
+          ...draft,
+          name,
+          id: editingId ?? undefined,
+          invitationSent: existing ? existing.invitationSent : false,
+        });
         setDraft(EMPTY_DRAFT);
+        setEditingId(null);
+        setFormOpen(false);
         await refresh();
       } catch (err) {
         setView({ kind: "error", message: errorMessage(err) });
@@ -344,12 +383,16 @@ export function AdminPage() {
 
       {tab === "guests" && (
         <>
-      <details className="bg-white border border-bone rounded-lg p-6 mb-8 shadow-sm group">
+      <details
+        className="bg-white border border-bone rounded-lg p-6 mb-8 shadow-sm group"
+        open={formOpen}
+        onToggle={(e) => setFormOpen((e.currentTarget as HTMLDetailsElement).open)}
+      >
         <summary className="cursor-pointer font-medium text-sm flex items-center gap-3 list-none [&::-webkit-details-marker]:hidden">
           <span className="w-6 h-6 rounded-full bg-ink text-white inline-flex items-center justify-center text-base leading-none transition-transform group-open:rotate-45">
             +
           </span>
-          Agregar invitado
+          {editingId ? `Editando a ${draft.name || "este invitado"}` : "Agregar invitado"}
         </summary>
         <form onSubmit={handleSubmitDraft}>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 mt-6">
@@ -433,13 +476,13 @@ export function AdminPage() {
             <button
               type="button"
               className="btn-ghost"
-              onClick={() => setDraft(EMPTY_DRAFT)}
+              onClick={() => (editingId ? cancelEditing() : setDraft(EMPTY_DRAFT))}
               disabled={saving}
             >
-              Limpiar
+              {editingId ? "Cancelar" : "Limpiar"}
             </button>
             <button type="submit" className="btn-primary" disabled={saving}>
-              {saving ? "Guardando…" : "Agregar"}
+              {saving ? "Guardando…" : editingId ? "Guardar cambios" : "Agregar"}
             </button>
           </div>
         </form>
@@ -521,6 +564,7 @@ export function AdminPage() {
         guests={filtered}
         totalGuests={guests.length}
         venueTables={venueTables}
+        onEdit={startEditing}
         onChangeTable={changeTable}
         onToggleInvitation={toggleInvitationSent}
         onCopyLink={copyGuestLink}
@@ -771,6 +815,7 @@ type TableProps = {
   /** Unfiltered count, so the empty state can tell "no guests" from "no matches". */
   totalGuests: number;
   venueTables: readonly VenueTable[];
+  onEdit: (guest: Guest) => void;
   onChangeTable: (guest: Guest, table: string) => void;
   onToggleInvitation: (guest: Guest) => void;
   onCopyLink: (id: string) => void;
@@ -822,17 +867,27 @@ function SentCheckbox({ guest, onToggle }: { guest: Guest; onToggle: (guest: Gue
 
 function GuestActions({
   guest,
+  onEdit,
   onCopyLink,
   onSendWhatsApp,
   onDelete,
 }: {
   guest: Guest;
+  onEdit: (guest: Guest) => void;
   onCopyLink: (id: string) => void;
   onSendWhatsApp: (guest: Guest) => void;
   onDelete: (guest: Guest) => void;
 }) {
   return (
     <div className="flex gap-1.5">
+      <button
+        className="icon-action"
+        onClick={() => onEdit(guest)}
+        title="Editar"
+        aria-label={`Editar los datos de ${guest.name}`}
+      >
+        <LuPencil size={16} aria-hidden="true" />
+      </button>
       <button
         className="icon-action icon-action--brand"
         onClick={() => onSendWhatsApp(guest)}
@@ -879,6 +934,7 @@ function GuestTable({
   guests,
   totalGuests,
   venueTables,
+  onEdit,
   onChangeTable,
   onToggleInvitation,
   onCopyLink,
@@ -932,6 +988,7 @@ function GuestTable({
             <footer className="flex justify-end mt-4">
               <GuestActions
                 guest={guest}
+                onEdit={onEdit}
                 onCopyLink={onCopyLink}
                 onSendWhatsApp={onSendWhatsApp}
                 onDelete={onDelete}
@@ -997,6 +1054,7 @@ function GuestTable({
                   <div className="flex justify-end">
                     <GuestActions
                       guest={guest}
+                      onEdit={onEdit}
                       onCopyLink={onCopyLink}
                       onSendWhatsApp={onSendWhatsApp}
                       onDelete={onDelete}
