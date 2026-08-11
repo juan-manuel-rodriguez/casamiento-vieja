@@ -1,8 +1,11 @@
-# Casamiento RSVP
+# Casamiento Seba & Emi
 
 App estática (React + Vite + Tailwind) para que los invitados confirmen
-asistencia y vos veas el resumen desde un admin protegido con una contraseña
-compartida.
+asistencia y Seba & Emi vean el resumen desde un admin protegido con una
+contraseña compartida. Vive en <https://sebayemi.noscasamos.lat>.
+
+Es un fork de [casamiento](https://github.com/juan-manuel-rodriguez/casamiento),
+que quedó como remote `upstream`: los arreglos se traen con `git cherry-pick`.
 
 ## Arquitectura
 
