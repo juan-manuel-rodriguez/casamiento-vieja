@@ -208,13 +208,18 @@ function Hero() {
   return (
     <header className="relative isolate">
       {EVENT.photoUrl && (
-        <div className="relative h-[clamp(300px,56vh,600px)] overflow-hidden">
+        /* La foto es vertical. A sangre completa en una pantalla ancha habría
+           que agrandarla tanto que solo entraría una franja: por eso arriba de
+           lg se le pone tope de ancho y se funde también por los costados. */
+        <div className="relative mx-auto w-full lg:max-w-3xl h-[clamp(320px,60vh,640px)] overflow-hidden">
           <img
             src={EVENT.photoUrl}
             alt=""
             className="absolute inset-0 w-full h-full object-cover saturate-[0.92]"
-            style={{ objectPosition: "50% 20%" }}
+            style={{ objectPosition: "50% 22%" }}
           />
+          <div className="absolute inset-y-0 left-0 w-24 bg-linear-to-r from-ivory to-transparent hidden lg:block" />
+          <div className="absolute inset-y-0 right-0 w-24 bg-linear-to-l from-ivory to-transparent hidden lg:block" />
           {/* La foto se disuelve en el crema, como en la invitación impresa. */}
           <div className="absolute inset-x-0 bottom-0 h-2/5 bg-linear-to-b from-transparent to-ivory" />
         </div>
