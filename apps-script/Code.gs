@@ -88,7 +88,7 @@ var ADMIN_PASSPHRASE_KEY = 'ADMIN_PASSPHRASE';
  * deployment" mints a second URL instead of updating the one the app calls.
  * @const {string}
  */
-var CODE_VERSION = '2026-08-04.2';
+var CODE_VERSION = '2026-08-11.1';
 
 // ---------- Public bootstrap ----------
 
