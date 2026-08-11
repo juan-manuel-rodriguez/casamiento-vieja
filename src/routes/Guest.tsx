@@ -9,6 +9,7 @@ import {
 } from "../api/songs";
 import { EVENT, type EventOccurrence } from "../config";
 import { LaurelBranch } from "../components/LaurelBranch";
+import { shouldRestartClip, type PlaybackState } from "../lib/playback";
 
 type ViewState =
   | { kind: "loading" }
@@ -936,8 +937,12 @@ function extractSpotifyTrackId(url: string): string | null {
 
 type SpotifyController = {
   play: () => void;
+  seek?: (seconds: number) => void;
   addListener?: (event: string, cb: (data: unknown) => void) => void;
 };
+
+/** Payload de `playback_update`. Las posiciones vienen en milisegundos. */
+type PlaybackUpdate = { data?: PlaybackState };
 
 declare global {
   interface Window {
@@ -1009,9 +1014,32 @@ function SpotifyPlayer({
               attemptPlay();
             }
           };
+
+          /**
+           * Spotify le sirve al embed un preview de ~25 s, no el tema
+           * completo: el tema entero requiere que el invitado tenga sesión de
+           * Spotify iniciada en su navegador, y no la va a tener. Sin esto la
+           * música arranca y se corta sola a los 25 segundos, que fue lo que
+           * reportaron los invitados. Al llegar al final rebobina y sigue.
+           *
+           * Solo reengancha si el clip terminó de verdad. Si el invitado lo
+           * pausa a mano en el medio, se respeta y no se reanuda solo.
+           */
+          const loopWhenFinished = (event: unknown) => {
+            if (!played) return;
+            if (!shouldRestartClip((event as PlaybackUpdate)?.data)) return;
+            try {
+              controller.seek?.(0);
+              controller.play();
+            } catch {
+              // ignore; el embed a veces tira excepciones transitorias
+            }
+          };
+
           if (typeof controller.addListener === "function") {
             controller.addListener("ready", markReady);
             controller.addListener("playback_update", markReady);
+            controller.addListener("playback_update", loopWhenFinished);
           }
           window.setTimeout(markReady, 600);
         },
