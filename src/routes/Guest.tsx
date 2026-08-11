@@ -47,7 +47,7 @@ export function GuestPage() {
   const hasAudio = Boolean(ownAudio) || Boolean(trackId);
 
   const [view, setView] = useState<ViewState>(initialView);
-  const [entered, setEntered] = useState(isDemo || !hasAudio);
+  const [entered, setEntered] = useState(isDemo || !ownAudio);
   const playerRef = useRef<{ play: () => void } | null>(null);
   const [adultsConfirmed, setAdultsConfirmed] = useState(
     initialView.kind === "ready" ? initialView.guest.adultSlots : 1,
