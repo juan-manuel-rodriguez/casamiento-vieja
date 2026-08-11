@@ -105,7 +105,7 @@ var ADMIN_PASSPHRASE_KEY = 'ADMIN_PASSPHRASE';
  * deployment" mints a second URL instead of updating the one the app calls.
  * @const {string}
  */
-var CODE_VERSION = '2026-08-11.2';
+var CODE_VERSION = '2026-08-11.3';
 
 // ---------- Public bootstrap ----------
 
@@ -121,9 +121,29 @@ function setup() {
   dropLegacyRsvpsSheet_();
   ensureTextColumns_();
   ensureSheetWithHeaders_(SONG_RECS_TAB, SONG_RECS_HEADERS);
+  var tablesExisted = Boolean(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TABLES_TAB));
   ensureSheetWithHeaders_(TABLES_TAB, TABLES_HEADERS);
+  if (!tablesExisted) seedDefaultTables_();
   ensureSheetWithHeaders_(SETTINGS_TAB, SETTINGS_HEADERS);
   ensureSettingsTextColumn_();
+}
+
+/** @const {number} */ var DEFAULT_TABLE_COUNT = 20;
+/** @const {number} */ var DEFAULT_TABLE_SEATS = 8;
+
+/**
+ * Siembra mesas para poder empezar a sentar gente sin cargarlas una por una.
+ *
+ * Corre UNA sola vez, cuando la pestaña se crea. Si corriera cada vez que la
+ * pestaña está vacía, borrar todas las mesas a propósito las haría volver en
+ * el request siguiente, porque `setup` se ejecuta en cada llamada.
+ */
+function seedDefaultTables_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TABLES_TAB);
+  if (!sheet || sheet.getLastRow() >= 2) return;
+  var rows = [];
+  for (var i = 1; i <= DEFAULT_TABLE_COUNT; i++) rows.push([i, DEFAULT_TABLE_SEATS, '']);
+  sheet.getRange(2, 1, rows.length, TABLES_HEADERS.length).setValues(rows);
 }
 
 /**
