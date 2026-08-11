@@ -237,40 +237,66 @@ function Hero() {
  * Rama de laurel de las esquinas. Las hojas se generan sobre el tallo en vez
  * de dibujarse a mano para que queden parejas y sea fácil cambiar el largo.
  */
+/** Puntos de control del tallo, en coordenadas del viewBox. */
+const STEM = [
+  [46, 134],
+  [30, 104],
+  [23, 60],
+  [30, 7],
+] as const;
+
+/** Hoja de laurel: puntiaguda en las dos puntas, apoyada en el origen. */
+const LEAF_PATH = "M0 0C6.2-6.2 14.9-7.2 24 0 14.9 7.2 6.2 6.2 0 0Z";
+
+/** Apertura de la hoja respecto de la tangente del tallo, en grados. */
+const LEAF_SPREAD = 55;
+
+function stemPoint(t: number): [number, number] {
+  const u = 1 - t;
+  const w = [u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t];
+  return [
+    w[0] * STEM[0][0] + w[1] * STEM[1][0] + w[2] * STEM[2][0] + w[3] * STEM[3][0],
+    w[0] * STEM[0][1] + w[1] * STEM[1][1] + w[2] * STEM[2][1] + w[3] * STEM[3][1],
+  ];
+}
+
+/** Ángulo de la tangente al tallo, en grados, apuntando hacia la punta. */
+function stemAngle(t: number): number {
+  const u = 1 - t;
+  const dx =
+    3 * u * u * (STEM[1][0] - STEM[0][0]) +
+    6 * u * t * (STEM[2][0] - STEM[1][0]) +
+    3 * t * t * (STEM[3][0] - STEM[2][0]);
+  const dy =
+    3 * u * u * (STEM[1][1] - STEM[0][1]) +
+    6 * u * t * (STEM[2][1] - STEM[1][1]) +
+    3 * t * t * (STEM[3][1] - STEM[2][1]);
+  return (Math.atan2(dy, dx) * 180) / Math.PI;
+}
+
+/**
+ * Media corona de laurel. Las hojas se apoyan sobre la curva del tallo
+ * siguiendo su tangente, así ninguna queda cruzada ni flotando, y encogen
+ * hacia la punta como en la rama real.
+ */
 function LaurelBranch({ className }: { className?: string }) {
-  const leaves = [0, 1, 2, 3, 4];
   return (
-    <svg
-      viewBox="0 0 76 132"
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.6"
-      aria-hidden="true"
-    >
-      <path d="M52 128 C 34 100, 28 58, 34 8" strokeLinecap="round" />
-      {leaves.map((i) => {
-        const t = i / (leaves.length - 1);
-        // Las hojas encogen hacia la punta, que es como crece la rama real.
-        const scale = 1 - t * 0.32;
-        const x = 52 - t * 18;
-        const y = 118 - t * 100;
+    <svg viewBox="0 0 76 140" className={className} fill="currentColor" aria-hidden="true">
+      <path
+        d={`M${STEM[0][0]} ${STEM[0][1]}C${STEM[1][0]} ${STEM[1][1]} ${STEM[2][0]} ${STEM[2][1]} ${STEM[3][0]} ${STEM[3][1]}`}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+      />
+      {[0.05, 0.23, 0.41, 0.59, 0.77, 0.95].map((t) => {
+        const [x, y] = stemPoint(t);
+        const angle = stemAngle(t);
+        const scale = 1 - t * 0.35;
         return (
-          <g key={i}>
-            <ellipse
-              cx={x - 16 * scale}
-              cy={y - 5}
-              rx={16 * scale}
-              ry={7.5 * scale}
-              transform={`rotate(${-34 - t * 12} ${x - 16 * scale} ${y - 5})`}
-            />
-            <ellipse
-              cx={x + 15 * scale}
-              cy={y - 14}
-              rx={15 * scale}
-              ry={7 * scale}
-              transform={`rotate(${32 + t * 12} ${x + 15 * scale} ${y - 14})`}
-            />
+          <g key={t} transform={`translate(${x} ${y})`}>
+            <path d={LEAF_PATH} transform={`rotate(${angle - LEAF_SPREAD}) scale(${scale})`} />
+            <path d={LEAF_PATH} transform={`rotate(${angle + LEAF_SPREAD}) scale(${scale})`} />
           </g>
         );
       })}
@@ -469,24 +495,36 @@ function HeartGlyph({ className }: { className?: string }) {
   );
 }
 
-/** Alianzas entrelazadas: la ceremonia civil. */
+/** Alianzas entrelazadas con su piedra: la ceremonia civil. */
 function RingsIcon({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 40 40" className={className} {...STROKE_ICON} aria-hidden="true">
-      <circle cx="15" cy="24" r="10" />
-      <circle cx="26" cy="24" r="10" />
-      <path d="M20 11.5 17 7h6l-3 4.5Z" />
+    <svg viewBox="0 0 44 40" className={className} {...STROKE_ICON} strokeWidth={1.8} aria-hidden="true">
+      <circle cx="16.5" cy="26" r="10.5" />
+      <circle cx="28.5" cy="26" r="10.5" />
+      <path d="M28.5 6.5 33 11.3l-4.5 4.8-4.5-4.8 4.5-4.8Z" />
     </svg>
   );
 }
 
-/** Copas brindando: la fiesta. */
+/**
+ * Dos copas brindando: la fiesta. Se dibuja una sola copa y se coloca dos
+ * veces girada sobre el borde, así los bordes quedan arriba y juntos y las
+ * bases se abren, que es la silueta del brindis.
+ */
 function ToastIcon({ className }: { className?: string }) {
+  const flute = (
+    <>
+      <path d="M-7.5 0h15l-2.4 14.6A5.3 5.3 0 0 1 0 19.2a5.3 5.3 0 0 1-5.1-4.6L-7.5 0Z" />
+      <path d="M0 19.2v10.4M-5.6 30.4h11.2" />
+    </>
+  );
   return (
-    <svg viewBox="0 0 40 40" className={className} {...STROKE_ICON} aria-hidden="true">
-      <path d="M13 6 7 8l3.5 9a4 4 0 0 0 7.5-1.4L18 7l-5-1Z" />
-      <path d="M27 6l6 2-3.5 9a4 4 0 0 1-7.5-1.4L22 7l5-1Z" />
-      <path d="M14 22.5 12 34M26 22.5 28 34M8 34h9M23 34h9" />
+    <svg viewBox="0 0 44 40" className={className} {...STROKE_ICON} aria-hidden="true">
+      <g transform="translate(15 5.5) rotate(13)">{flute}</g>
+      <g transform="translate(29 5.5) rotate(-13)">{flute}</g>
+      <circle cx="22" cy="3" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="17.2" cy="1.2" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="26.8" cy="1.2" r="0.9" fill="currentColor" stroke="none" />
     </svg>
   );
 }
