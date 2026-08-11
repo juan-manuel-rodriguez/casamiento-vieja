@@ -261,6 +261,9 @@ export function AdminPage() {
   function cancelEditing() {
     setEditingId(null);
     setDraft(EMPTY_DRAFT);
+    // Cancelar cierra el formulario. Dejarlo abierto y vacío parece que se
+    // estuviera por dar de alta a alguien, que es lo contrario de cancelar.
+    setFormOpen(false);
   }
 
   async function handleSubmitDraft(event: React.FormEvent) {
