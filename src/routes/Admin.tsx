@@ -17,7 +17,6 @@ import {
 import { clearPassphrase, loadPassphrase, savePassphrase } from "../auth/passphrase";
 import type { EventConfig, EventOccurrence, GiftAccount } from "../config";
 import { getEvent, useEvent, applyEventOverrides } from "../lib/event";
-import { firstName } from "../lib/names";
 import {
   planLayout,
   seatPositions,
@@ -316,9 +315,12 @@ export function AdminPage() {
       return;
     }
     const inviteLink = buildGuestLink(guest.id);
+    // Sin el nombre del invitado: la invitación tampoco lo nombra. El texto
+    // sale de la frase de la invitación, así se edita desde el admin y no
+    // queda otra copia suelta en el código.
     const message = [
-      `Hola ${firstName(guest.name)}!`,
-      "Te compartimos tu invitación a nuestro casamiento:",
+      `¡Nos casamos! ${invitation.tagline}.`,
+      "Acá está tu invitación:",
       inviteLink,
     ].join("\n");
     const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
