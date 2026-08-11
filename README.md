@@ -76,6 +76,24 @@ invitación": existe solo para que un click habilite el autoplay del reproductor
 3. En la página del app: copiá **Client ID** y, atrás del botón "View client secret", el **Client Secret**.
 4. En el editor de Apps Script → ⚙ **Project Settings → Script Properties**, agregá dos rows: `SPOTIFY_CLIENT_ID` y `SPOTIFY_CLIENT_SECRET` con los valores que copiaste. Sobreviven a redeploys.
 
+## Preview del link (og.png)
+
+`public/og.png` es la tarjeta que muestran WhatsApp, Telegram e iMessage al
+pegar el link. Se genera con Chrome headless a partir de un HTML; el fuente
+está en el historial de la conversación, no en el repo.
+
+**Al cambiarla hay que subir el `?v=` de `og:image` y `twitter:image` en
+[`index.html`](index.html)**. WhatsApp cachea la preview por URL: si la URL no
+cambia, sigue mostrando la imagen vieja aunque el archivo ya sea otro.
+
+Los links de invitado son todos distintos (`/?id=XXX`), así que a quien todavía
+no le mandaste el link le va a llegar la versión nueva igual. El cacheo solo
+afecta a los links ya compartidos.
+
+Para forzar el refresco de uno ya compartido: pegá la URL en el
+[Sharing Debugger de Facebook](https://developers.facebook.com/tools/debug/) y
+dale "Scrape Again".
+
 ## Desarrollo
 
 ```bash
