@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { fetchPublicGuest, type PublicGuest } from "../api/guests";
 import { submitRsvp, type RsvpResponse } from "../api/rsvp";
@@ -7,7 +7,7 @@ import {
   submitSongRecommendation,
   type SpotifyTrack,
 } from "../api/songs";
-import { EVENT, MAIN_EVENT } from "../config";
+import { EVENT, type EventOccurrence } from "../config";
 import { firstName } from "../lib/names";
 
 type ViewState =
@@ -80,11 +80,6 @@ export function GuestPage() {
       .catch((err: unknown) => setView({ kind: "error", message: errorMessage(err) }));
   }, [id, isDemo]);
 
-  const heroStyle = useMemo<React.CSSProperties | undefined>(() => {
-    if (!EVENT.photoUrl) return undefined;
-    return { backgroundImage: `url("${EVENT.photoUrl}")` };
-  }, []);
-
   async function respond(response: RsvpResponse) {
     if (view.kind !== "ready" || submitting) return;
     setSubmitting(true);
@@ -107,7 +102,7 @@ export function GuestPage() {
 
   return (
     <div className="min-h-dvh flex flex-col">
-      <Hero photoStyle={heroStyle} />
+      <Hero />
       <main className="flex-1">
         {view.kind === "loading" && <StatusBlock eyebrow="Un momento" title="Cargando tu invitación…" />}
         {view.kind === "error" && (
@@ -160,8 +155,15 @@ export function GuestPage() {
           </>
         )}
       </main>
-      <footer className="border-t border-bone py-12 px-6 text-center text-sm text-subtle">
-        Con amor, {EVENT.couple}
+      <footer className="px-6 pt-4 pb-14 text-center">
+        <HeartDivider />
+        <div className="relative max-w-md mx-auto px-12">
+          <LaurelBranch className="absolute left-0 bottom-0 w-7 text-brass/70" />
+          <LaurelBranch className="absolute right-0 bottom-0 w-7 text-brass/70 -scale-x-100" />
+          <p className="font-script text-[clamp(2.2rem,9vw,3.4rem)] leading-none text-ink m-0 pb-1">
+            {EVENT.signature}
+          </p>
+        </div>
       </footer>
       {!entered && <CoverScreen onEnter={handleEnter} />}
     </div>
@@ -177,27 +179,20 @@ function CoverScreen({ onEnter }: { onEnter: () => void }) {
           "radial-gradient(ellipse at 20% 0%, rgba(234,217,184,0.85) 0%, transparent 55%), radial-gradient(ellipse at 80% 100%, rgba(234,217,184,0.6) 0%, transparent 60%), linear-gradient(180deg, #f8f3ea 0%, #f1ebdd 100%)",
       }}
     >
-      <p className="font-sans text-[0.78rem] uppercase tracking-[0.22em] text-muted font-medium m-0 mb-6">
-        Nos casamos
-      </p>
-      <h1 className="font-display italic font-normal text-[clamp(3rem,11vw,5.5rem)] leading-[0.95] tracking-tight text-ink m-0">
-        {EVENT.couple}
-      </h1>
-      <div className="my-8 w-48 max-w-[60vw] flex items-center justify-center gap-3 text-sand">
-        <span className="flex-1 h-px bg-current" />
-        <svg
-          viewBox="0 0 24 24"
-          className="w-3.5 h-3.5 text-gold"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-        >
-          <path d="M12 2 L22 12 L12 22 L2 12 Z" />
-        </svg>
-        <span className="flex-1 h-px bg-current" />
+      <div className="relative w-full max-w-lg px-12 sm:px-16">
+        <LaurelBranch className="absolute left-0 top-1/2 -translate-y-1/2 w-9 sm:w-12 text-brass/75" />
+        <LaurelBranch className="absolute right-0 top-1/2 -translate-y-1/2 w-9 sm:w-12 text-brass/75 -scale-x-100" />
+        <h1 className="font-display font-normal uppercase text-brass text-[clamp(2.4rem,11vw,5rem)] leading-[0.95] m-0">
+          Nos casamos
+        </h1>
+        <p className="mt-3 font-display text-[clamp(1rem,4.2vw,1.5rem)] leading-snug text-ink/85 text-balance m-0">
+          {EVENT.tagline}{" "}
+          <HeartGlyph className="inline w-[0.7em] h-[0.7em] align-baseline text-brass" />
+        </p>
       </div>
-      <p className="font-sans text-sm uppercase tracking-[0.18em] text-muted m-0 mb-10">
-        {EVENT.date}
+      <HeartDivider className="my-9 w-56 max-w-[70vw]" />
+      <p className="font-script text-[clamp(2rem,8vw,2.8rem)] leading-none text-ink m-0 mb-10 pb-1">
+        {EVENT.signature}
       </p>
       <button type="button" onClick={onEnter} className="btn-primary">
         Ver invitación
@@ -209,37 +204,94 @@ function CoverScreen({ onEnter }: { onEnter: () => void }) {
 
 /* ---------- Sections ---------- */
 
-function Hero({ photoStyle }: { photoStyle?: React.CSSProperties }) {
-  const hasPhoto = Boolean(EVENT.photoUrl);
+function Hero() {
   return (
-    <header className="relative isolate flex flex-col items-center justify-center text-center px-6 py-24 sm:py-32 min-h-[560px] overflow-hidden">
-      <div
-        className="absolute inset-0 -z-10"
-        style={{
-          background:
-            "radial-gradient(ellipse at 20% 0%, rgba(234,217,184,0.7) 0%, transparent 50%), radial-gradient(ellipse at 80% 100%, rgba(234,217,184,0.5) 0%, transparent 55%), linear-gradient(180deg, #f8f3ea 0%, #f1ebdd 100%)",
-        }}
-      />
-      {hasPhoto && (
-        <>
-          <div
-            className="absolute inset-0 -z-20 bg-center bg-cover saturate-[0.85]"
-            style={photoStyle}
+    <header className="relative isolate">
+      {EVENT.photoUrl && (
+        <div className="relative h-[clamp(300px,56vh,600px)] overflow-hidden">
+          <img
+            src={EVENT.photoUrl}
+            alt=""
+            className="absolute inset-0 w-full h-full object-cover saturate-[0.92]"
+            style={{ objectPosition: "50% 20%" }}
           />
-          <div className="absolute inset-0 -z-10 bg-gradient-to-b from-ivory/55 to-ivory/90" />
-        </>
+          {/* La foto se disuelve en el crema, como en la invitación impresa. */}
+          <div className="absolute inset-x-0 bottom-0 h-2/5 bg-linear-to-b from-transparent to-ivory" />
+        </div>
       )}
-      <Eyebrow className="mb-6">Nos casamos</Eyebrow>
-      <h1 className="font-display italic font-normal text-[clamp(3.25rem,12vw,6.5rem)] leading-[0.95] tracking-tight text-ink m-0">
-        {EVENT.couple}
-      </h1>
-      <Ornament />
-      <p className="flex flex-col sm:flex-row items-center gap-2 sm:gap-3 font-sans text-sm uppercase tracking-[0.18em] text-muted m-0">
-        <strong className="font-medium text-ink tracking-[0.22em]">{EVENT.date}</strong>
-        <span className="hidden sm:inline" aria-hidden="true">·</span>
-        <span>{MAIN_EVENT.venue}</span>
-      </p>
+      <div className="relative text-center px-6 pt-6 pb-12">
+        <div className="relative max-w-3xl mx-auto px-11 sm:px-20">
+          <LaurelBranch className="absolute left-0 top-1/2 -translate-y-1/2 w-10 sm:w-14 text-brass/75" />
+          <LaurelBranch className="absolute right-0 top-1/2 -translate-y-1/2 w-10 sm:w-14 text-brass/75 -scale-x-100" />
+          <h1 className="font-display font-normal uppercase text-brass text-[clamp(2.5rem,11.5vw,5.5rem)] leading-[0.95] tracking-[0.01em] m-0">
+            Nos casamos
+          </h1>
+          <p className="mt-3 font-display text-[clamp(1.05rem,4.4vw,1.7rem)] leading-snug text-ink/85 text-balance m-0">
+            {EVENT.tagline}{" "}
+            <HeartGlyph className="inline w-[0.7em] h-[0.7em] align-baseline text-brass" />
+          </p>
+        </div>
+      </div>
     </header>
+  );
+}
+
+/**
+ * Rama de laurel de las esquinas. Las hojas se generan sobre el tallo en vez
+ * de dibujarse a mano para que queden parejas y sea fácil cambiar el largo.
+ */
+function LaurelBranch({ className }: { className?: string }) {
+  const leaves = [0, 1, 2, 3, 4];
+  return (
+    <svg
+      viewBox="0 0 76 132"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.6"
+      aria-hidden="true"
+    >
+      <path d="M52 128 C 34 100, 28 58, 34 8" strokeLinecap="round" />
+      {leaves.map((i) => {
+        const t = i / (leaves.length - 1);
+        // Las hojas encogen hacia la punta, que es como crece la rama real.
+        const scale = 1 - t * 0.32;
+        const x = 52 - t * 18;
+        const y = 118 - t * 100;
+        return (
+          <g key={i}>
+            <ellipse
+              cx={x - 16 * scale}
+              cy={y - 5}
+              rx={16 * scale}
+              ry={7.5 * scale}
+              transform={`rotate(${-34 - t * 12} ${x - 16 * scale} ${y - 5})`}
+            />
+            <ellipse
+              cx={x + 15 * scale}
+              cy={y - 14}
+              rx={15 * scale}
+              ry={7 * scale}
+              transform={`rotate(${32 + t * 12} ${x + 15 * scale} ${y - 14})`}
+            />
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+/** Filete · corazón · filete. Es el separador que usa la invitación impresa. */
+function HeartDivider({ className }: { className?: string }) {
+  return (
+    <div
+      className={`flex items-center justify-center gap-4 text-sand ${className ?? "my-10"}`}
+      aria-hidden="true"
+    >
+      <span className="h-px flex-1 max-w-36 bg-current" />
+      <HeartGlyph className="w-3.5 h-3.5 text-brass shrink-0" />
+      <span className="h-px flex-1 max-w-36 bg-current" />
+    </div>
   );
 }
 
@@ -247,8 +299,8 @@ function Greeting({ name }: { name: string }) {
   return (
     <Section>
       <Eyebrow>Bienvenida / Bienvenido</Eyebrow>
-      <h2 className="font-display italic font-normal text-4xl sm:text-5xl mb-4">
-        Hola, <span className="text-gold-dark">{firstName(name)}</span>
+      <h2 className="font-script text-[clamp(2.2rem,8vw,3rem)] leading-none m-0 mb-5 pb-1">
+        Hola, <span className="text-brass">{firstName(name)}</span>
       </h2>
       <p className="text-muted max-w-prose mx-auto">
         Queremos compartir con vos uno de los días más importantes de nuestra vida. Esperamos que
@@ -259,75 +311,122 @@ function Greeting({ name }: { name: string }) {
 }
 
 function EventDetails() {
-  const multi = EVENT.events.length > 1;
   return (
     <Section wide>
-      <Eyebrow>El plan</Eyebrow>
-      <h2 className="font-display italic font-normal text-4xl sm:text-5xl mb-8">Detalles del evento</h2>
-      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 text-left">
-        {EVENT.events.map((occurrence) => (
-          <Fragment key={occurrence.label}>
-            <DetailTile
-              eyebrow={multi ? `Cuándo · ${occurrence.label}` : "Cuándo"}
-              title={occurrence.date}
-            >
-              {occurrence.time && (
-                <p className="text-sm text-muted m-0">A partir de las {occurrence.time}, por favor ser puntuales.</p>
-              )}
-              {occurrence.note && <p className="text-sm text-muted m-0">{occurrence.note}</p>}
-            </DetailTile>
-            <DetailTile
-              eyebrow={multi ? `Dónde · ${occurrence.label}` : "Dónde"}
-              title={occurrence.venue}
-            >
-              {occurrence.address && <p className="text-sm text-muted m-0">{occurrence.address}</p>}
-              {occurrence.mapUrl && (
-                <a
-                  className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-gold-dark underline underline-offset-4 decoration-soft hover:text-ink transition-colors"
-                  href={occurrence.mapUrl}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                >
-                  <MapPinIcon />
-                  ¿Cómo llego?
-                </a>
-              )}
-            </DetailTile>
-          </Fragment>
+      <HeartDivider className="mb-10" />
+      <div className="grid grid-cols-1 sm:grid-cols-2">
+        {EVENT.events.map((occurrence, i) => (
+          <div
+            key={occurrence.label}
+            className={
+              i > 0
+                ? "pt-9 mt-9 border-t border-dotted border-sand sm:pt-0 sm:mt-0 sm:border-t-0 sm:pl-10 sm:border-l"
+                : "sm:pr-10"
+            }
+          >
+            <EventColumn occurrence={occurrence} />
+          </div>
         ))}
-        <DressCodeTile />
-        <DetailTile eyebrow="Confirmar antes del" title={EVENT.rsvpDeadline}>
-          <p className="text-sm text-muted m-0">Para que podamos organizar todo a tiempo.</p>
-        </DetailTile>
+      </div>
+      {EVENT.punctualityNote && (
+        <>
+          <HeartDivider />
+          <p className="font-display text-xl sm:text-2xl leading-snug text-ink/85 max-w-lg mx-auto m-0">
+            {EVENT.punctualityNote}
+          </p>
+        </>
+      )}
+      <HeartDivider />
+      <div className="inline-flex items-center gap-4 rounded-2xl border border-brass/45 px-6 py-5 sm:px-8">
+        <CalendarIcon className="w-7 h-7 text-brass shrink-0" />
+        <p className="font-display text-lg sm:text-xl leading-snug text-ink m-0 text-left">
+          No te olvides de confirmar asistencia
+          <br />
+          antes del {EVENT.rsvpDeadline}
+        </p>
       </div>
     </Section>
   );
 }
 
+function EventColumn({ occurrence }: { occurrence: EventOccurrence }) {
+  return (
+    <div className="text-center">
+      <div className="flex items-center justify-center gap-3 mb-6">
+        {occurrence.icon === "rings" ? (
+          <RingsIcon className="w-10 h-10 text-brass shrink-0" />
+        ) : (
+          <ToastIcon className="w-10 h-10 text-brass shrink-0" />
+        )}
+        <h2 className="font-script text-[clamp(1.9rem,7vw,2.8rem)] leading-none text-ink m-0 pb-1">
+          {occurrence.label}
+        </h2>
+      </div>
+      <div className="inline-grid gap-3.5 text-left">
+        <EventRow icon={<CalendarIcon className="w-5 h-5" />}>{occurrence.date}</EventRow>
+        {occurrence.time && <EventRow icon={<ClockIcon className="w-5 h-5" />}>{occurrence.time}</EventRow>}
+        <EventRow icon={<MapPinIcon className="w-5 h-5" />}>
+          {occurrence.venue}
+          {occurrence.address && (
+            <span className="block text-sm text-muted">{occurrence.address}</span>
+          )}
+          {occurrence.mapUrl && (
+            <a
+              className="mt-1 inline-flex items-center gap-1.5 text-sm font-medium text-gold-dark underline underline-offset-4 decoration-soft hover:text-ink transition-colors"
+              href={occurrence.mapUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+            >
+              ¿Cómo llego?
+            </a>
+          )}
+        </EventRow>
+        {occurrence.note && (
+          <EventRow icon={<HeartGlyph className="w-4 h-4" />}>{occurrence.note}</EventRow>
+        )}
+        {occurrence.showDressCode && <DressCodeRow />}
+      </div>
+    </div>
+  );
+}
+
+function EventRow({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="grid grid-cols-[1.5rem_1fr] items-start gap-3">
+      <span className="text-brass mt-1 flex justify-center" aria-hidden="true">
+        {icon}
+      </span>
+      <span className="font-display text-lg sm:text-xl leading-snug text-ink">{children}</span>
+    </div>
+  );
+}
+
 function GiftAccountSection() {
   return (
-    <Section>
-      <Eyebrow>Regalo</Eyebrow>
-      <div className="bg-white border border-bone rounded-2xl shadow-md p-8 sm:p-12 mt-6 text-center">
-        <h2 className="font-display italic font-normal text-4xl sm:text-5xl mb-4">Lista de regalos</h2>
-        <p className="text-muted max-w-prose mx-auto mb-6">{EVENT.giftMessage}</p>
-        <div className="max-w-sm mx-auto grid gap-10">
-          {EVENT.giftAccounts.map((account) => (
-            <div key={account.value}>
-              <p className="inline-flex items-center rounded-full border border-sand bg-soft/60 px-5 py-1.5 mb-5 text-[0.78rem] uppercase tracking-[0.2em] text-gold-dark font-medium">
-                {account.bank}
-              </p>
-              <div className="flex flex-col items-center gap-2 rounded-xl border border-bone bg-cream/40 px-6 py-5">
-                <span className="text-[0.78rem] uppercase tracking-[0.22em] text-subtle font-medium">
-                  {account.label}
-                </span>
-                <span className="font-sans text-xl sm:text-2xl tracking-[0.06em] text-ink tabular-nums">
-                  {account.value}
-                </span>
-              </div>
-              <p className="text-[0.8rem] text-subtle mt-3">
-                La cuenta está a nombre de {account.holder}.
-              </p>
+    <Section wide>
+      <div className="rounded-2xl border border-brass/40 px-6 py-10 sm:px-12">
+        <div className="flex items-center justify-center gap-3 mb-4">
+          <GiftIcon className="w-9 h-9 text-brass shrink-0" />
+          <h2 className="font-script text-[clamp(1.8rem,6.5vw,2.6rem)] leading-none text-ink m-0 pb-1">
+            Sugerencia de regalo
+          </h2>
+        </div>
+        <p className="text-muted max-w-prose mx-auto mb-9">{EVENT.giftMessage}</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2">
+          {EVENT.giftAccounts.map((account, i) => (
+            <div
+              key={account.value}
+              className={
+                i > 0
+                  ? "pt-8 mt-8 border-t border-dotted border-sand sm:pt-0 sm:mt-0 sm:border-t-0 sm:pl-8 sm:border-l"
+                  : "sm:pr-8"
+              }
+            >
+              <h3 className="font-display text-xl sm:text-2xl font-medium text-ink m-0">
+                Cuenta {account.bank} {account.label}
+              </h3>
+              <CopyableValue value={account.value} />
+              <p className="text-sm text-muted mt-2 m-0">{account.holder}</p>
             </div>
           ))}
         </div>
@@ -336,23 +435,115 @@ function GiftAccountSection() {
   );
 }
 
-function DetailTile({
-  eyebrow,
-  title,
-  children,
-}: {
-  eyebrow: string;
-  title: string;
-  children?: React.ReactNode;
-}) {
+/**
+ * El número de cuenta se toca para copiarlo: nadie transcribe a mano un CBU
+ * desde el teléfono sin equivocarse.
+ */
+function CopyableValue({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 2000);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
   return (
-    <div className="bg-white border border-bone rounded-lg p-6 shadow-sm flex flex-col gap-2">
-      <span className="text-[0.78rem] uppercase tracking-[0.22em] text-subtle font-medium">
-        {eyebrow}
+    <button
+      type="button"
+      onClick={() => {
+        navigator.clipboard?.writeText(value).then(
+          () => setCopied(true),
+          () => undefined,
+        );
+      }}
+      className="group mt-2 inline-flex items-center gap-2.5 bg-transparent border-0 p-0 cursor-pointer"
+    >
+      <span className="font-sans text-xl sm:text-2xl tracking-[0.06em] text-ink tabular-nums">
+        {value}
       </span>
-      <h3 className="font-display text-2xl m-0 text-ink">{title}</h3>
-      {children}
-    </div>
+      <span className="text-[0.7rem] uppercase tracking-[0.16em] font-medium text-gold-dark group-hover:text-ink transition-colors">
+        {copied ? "Copiado" : "Copiar"}
+      </span>
+    </button>
+  );
+}
+
+/* ---------- Ornamentos e iconos de la invitación ---------- */
+
+const STROKE_ICON = {
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 1.5,
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+} as const;
+
+function HeartGlyph({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
+      <path d="M12 21s-8.4-5.3-8.4-11a4.8 4.8 0 0 1 8.4-3.2A4.8 4.8 0 0 1 20.4 10c0 5.7-8.4 11-8.4 11Z" />
+    </svg>
+  );
+}
+
+/** Alianzas entrelazadas: la ceremonia civil. */
+function RingsIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 40 40" className={className} {...STROKE_ICON} aria-hidden="true">
+      <circle cx="15" cy="24" r="10" />
+      <circle cx="26" cy="24" r="10" />
+      <path d="M20 11.5 17 7h6l-3 4.5Z" />
+    </svg>
+  );
+}
+
+/** Copas brindando: la fiesta. */
+function ToastIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 40 40" className={className} {...STROKE_ICON} aria-hidden="true">
+      <path d="M13 6 7 8l3.5 9a4 4 0 0 0 7.5-1.4L18 7l-5-1Z" />
+      <path d="M27 6l6 2-3.5 9a4 4 0 0 1-7.5-1.4L22 7l5-1Z" />
+      <path d="M14 22.5 12 34M26 22.5 28 34M8 34h9M23 34h9" />
+    </svg>
+  );
+}
+
+function CalendarIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} {...STROKE_ICON} aria-hidden="true">
+      <rect x="3" y="5" width="18" height="16" rx="2.5" />
+      <path d="M3 10h18M8 3v4M16 3v4" />
+      <path d="M7.5 14h2M11 14h2M14.5 14h2M7.5 17.5h2M11 17.5h2" />
+    </svg>
+  );
+}
+
+function ClockIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} {...STROKE_ICON} aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5.2l3.4 2" />
+    </svg>
+  );
+}
+
+function GiftIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} {...STROKE_ICON} aria-hidden="true">
+      <rect x="3" y="9.5" width="18" height="11.5" rx="1.5" />
+      <path d="M2 9.5h20M12 9.5V21" />
+      <path d="M12 9.5S9.8 4 7.4 4a2.6 2.6 0 0 0 0 5.5M12 9.5S14.2 4 16.6 4a2.6 2.6 0 0 1 0 5.5" />
+    </svg>
+  );
+}
+
+function HangerIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} {...STROKE_ICON} aria-hidden="true">
+      <path d="M12 10V8.5a2.2 2.2 0 1 1 2.2-2.2" />
+      <path d="m12 10-8.4 5.6A1.6 1.6 0 0 0 4.5 18.5h15a1.6 1.6 0 0 0 .9-2.9L12 10Z" />
+    </svg>
   );
 }
 
@@ -390,7 +581,7 @@ function RsvpForm({
     <Section id="rsvp">
       <Eyebrow>Tu respuesta</Eyebrow>
       <div className="bg-white border border-bone rounded-2xl shadow-md p-8 sm:p-12 mt-6 text-left">
-        <h2 className="font-display italic font-normal text-4xl text-center mb-2">
+        <h2 className="font-script text-[clamp(1.9rem,7vw,2.6rem)] leading-none text-center m-0 mb-3 pb-1">
           Confirmá tu asistencia
         </h2>
         <p className="text-muted text-center mb-8">
@@ -488,20 +679,6 @@ function Eyebrow({ children, className }: { children: React.ReactNode; className
   );
 }
 
-function Ornament() {
-  return (
-    <div
-      className="my-8 mx-auto w-48 max-w-[60vw] flex items-center justify-center gap-3 text-sand"
-      aria-hidden="true"
-    >
-      <span className="flex-1 h-px bg-current" />
-      <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 text-gold" fill="none" stroke="currentColor" strokeWidth="1.5">
-        <path d="M12 2 L22 12 L12 22 L2 12 Z" />
-      </svg>
-      <span className="flex-1 h-px bg-current" />
-    </div>
-  );
-}
 
 function FieldLabel({ htmlFor, children }: { htmlFor?: string; children: React.ReactNode }) {
   return (
@@ -602,7 +779,7 @@ function StatusBlock({
   return (
     <section className="max-w-xl mx-auto px-6 py-24 text-center">
       <Eyebrow>{eyebrow}</Eyebrow>
-      <h1 className="font-display italic font-normal text-4xl sm:text-5xl mb-4">{title}</h1>
+      <h1 className="font-script text-[clamp(2rem,7.5vw,2.9rem)] leading-none m-0 mb-5 pb-1">{title}</h1>
       <div className="text-muted">{children}</div>
     </section>
   );
@@ -623,7 +800,7 @@ function ThankYouState({ response }: { response: RsvpResponse }) {
   );
 }
 
-function DressCodeTile() {
+function DressCodeRow() {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const women: readonly string[] = EVENT.dressCodeWomen ?? [];
   const men: readonly string[] = EVENT.dressCodeMen ?? [];
@@ -641,17 +818,18 @@ function DressCodeTile() {
 
   return (
     <>
-      <DetailTile eyebrow="Dress code" title={EVENT.dressCode}>
+      <EventRow icon={<HangerIcon className="w-5 h-5" />}>
+        Vestimenta {EVENT.dressCode}
         {hasDetails && (
           <button
             type="button"
             onClick={open}
-            className="mt-2 self-start text-sm font-medium text-gold-dark underline underline-offset-4 decoration-soft hover:text-ink transition-colors cursor-pointer bg-transparent border-0 p-0"
+            className="mt-1 block text-sm font-medium text-gold-dark underline underline-offset-4 decoration-soft hover:text-ink transition-colors cursor-pointer bg-transparent border-0 p-0"
           >
             ¿Qué me pongo?
           </button>
         )}
-      </DetailTile>
+      </EventRow>
 
       <dialog
         ref={dialogRef}
@@ -762,11 +940,11 @@ function ProhibitedIcon() {
   );
 }
 
-function MapPinIcon() {
+function MapPinIcon({ className = "w-4 h-4 -mt-px" }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 24 24"
-      className="w-4 h-4 -mt-px"
+      className={className}
       fill="none"
       stroke="currentColor"
       strokeWidth="1.6"
@@ -974,7 +1152,7 @@ function SongRecommendation({ guestId }: { guestId: string }) {
     <Section id="song-recommendation">
       <Eyebrow>Tu aporte musical</Eyebrow>
       <div className="bg-white border border-bone rounded-2xl shadow-md p-8 sm:p-12 mt-6 text-left">
-        <h2 className="font-display italic font-normal text-4xl text-center mb-2">
+        <h2 className="font-script text-[clamp(1.9rem,7vw,2.6rem)] leading-none text-center m-0 mb-3 pb-1">
           Recomendanos una canción
         </h2>
         <p className="text-muted text-center mb-8">

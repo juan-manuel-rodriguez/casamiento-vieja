@@ -10,21 +10,26 @@ export type InvitationSide = { value: string; label: string };
 
 /** One occurrence of the wedding: civil ceremony, party, etc. */
 export type EventOccurrence = {
-  /** Short label, only rendered when there is more than one occurrence. */
+  /** Script-set title of the column, e.g. "Ceremonia civil". */
   label: string;
   date: string;
   time: string;
   venue: string;
   address: string;
   mapUrl: string;
-  /** Optional extra line inside the "when" tile. */
+  /** Ornament above the title. Matches the printed invitation. */
+  icon: "rings" | "party";
+  /** Optional extra line under the venue. */
   note?: string;
+  /** When true, the dress code and its "¿Qué me pongo?" link show here. */
+  showDressCode?: boolean;
 };
 
 /** An account guests can transfer a gift to. */
 export type GiftAccount = {
-  /** Full chip text, e.g. "Banco BBVA" or "PREX". */
+  /** Nombre del banco, e.g. "PREX". Se compone como "Cuenta PREX pesos". */
   bank: string;
+  /** Moneda o tipo, e.g. "pesos". */
   label: string;
   value: string;
   holder: string;
@@ -36,6 +41,10 @@ export type GiftAccount = {
  */
 export const EVENT = {
   couple: "Seba & Emi",
+  /** Signature line at the foot of the page, set in the script face. */
+  signature: "Seba y Emi",
+  /** Sits under "Nos casamos" in the hero. */
+  tagline: "Y queremos que seas parte de nuestra historia",
   /** Headline date, shown in the cover and the hero: the party. */
   date: "23 de octubre de 2026",
   shortDate: "23.10.26",
@@ -48,22 +57,24 @@ export const EVENT = {
   events: [
     {
       label: "Ceremonia civil",
-      date: "Martes 20 de octubre de 2026",
-      time: "11:30 hs",
+      date: "Martes 20 de octubre",
+      time: "11:30 horas",
       venue: "Municipio de Salinas",
       address: "Salinas, Canelones",
       mapUrl:
         "https://www.google.com/maps/search/?api=1&query=Municipio+de+Salinas+Canelones",
+      icon: "rings",
     },
     {
       label: "Fiesta",
-      date: "Viernes 23 de octubre de 2026",
-      time: "20:30 hs",
+      date: "Viernes 23 de octubre",
+      time: "20:30 horas",
       venue: "Parque Policial Solymar",
       address: "Solymar, Canelones",
       mapUrl:
         "https://www.google.com/maps/search/?api=1&query=Parque+Policial+Solymar",
-      note: "Empieza puntual: queremos que disfrutes con nosotros de cada detalle.",
+      icon: "party",
+      showDressCode: true,
     },
   ] as readonly EventOccurrence[],
   dressCode: "Formal",
@@ -85,27 +96,29 @@ export const EVENT = {
     "Remeras informales",
     "Blanco (es el color de la novia)",
   ],
-  photoUrl: "",
+  photoUrl: "/sebayemi.jpeg",
   rsvpDeadline: "20 de setiembre",
+  punctualityNote:
+    "La fiesta comenzará puntualmente y queremos que disfrutes con nosotros de cada detalle.",
   giftMessage:
-    "Su presencia y sus buenos deseos son un regalo invaluable. Si igual nos quieren hacer un regalo, estas son nuestras mejores opciones.",
+    "Su presencia y sus buenos deseos son un regalo invaluable. Si consideras realizar un regalo, estas son nuestras mejores opciones.",
   /** Banco, tipo de cuenta y titular: los tres hacen falta para transferir. */
   giftAccounts: [
     {
       bank: "PREX",
-      label: "Cuenta en pesos",
+      label: "pesos",
       value: "1325987",
       holder: "Sebastián Consonni",
     },
     {
       bank: "BROU",
-      label: "Cuenta en dólares",
+      label: "dólares",
       value: "001404446-00003",
       holder: "Sebastián Consonni",
     },
   ] as readonly GiftAccount[],
-  /** Vacío a propósito: sin track no se muestra la portada. Ver README. */
-  spotifyTrackUrl: "",
+  /** Con track hay portada: el click habilita el autoplay del reproductor. */
+  spotifyTrackUrl: "https://open.spotify.com/track/5wq9WMmC3FzC7k1x6yVfAG",
 } as const;
 
 /** The occurrence that headlines the page: the last one, i.e. the party. */
