@@ -37,20 +37,17 @@
 /** @const {string} */ var SETTINGS_TAB = 'settings';
 
 /**
- * Legacy tab. RSVPs used to be appended here as an append-only history; they
- * now live as a snapshot inside `guests`. Kept as a constant only so the
- * migration can drain it and setup can delete it.
- * @const {string}
+ * Los invitados. La fila se crea cuando la persona confirma: declara su
+ * nombre, su cédula y cuánta gente lleva. `cedula` es la clave con la que se
+ * la reconoce si vuelve a completar el formulario, y va vacía en los que carga
+ * el admin a mano —gente mayor a la que no se le manda el link y de la que no
+ * hay forma de saber la cédula.
+ * @const {Array<string>}
  */
-var LEGACY_RSVPS_TAB = 'rsvps';
-
-/** @const {Array<string>} */
 var GUESTS_HEADERS = [
   'id',
   'name',
-  'adultSlots',
-  'kidSlots',
-  'invitationSent',
+  'cedula',
   'response',
   'adultsConfirmed',
   'kidsConfirmed',
@@ -58,12 +55,15 @@ var GUESTS_HEADERS = [
   'rsvpTimestamp',
   'contact',
   'notes',
-  'side',
   'table',
 ];
 
-/** @const {Array<string>} */
-var SONG_RECS_HEADERS = ['timestamp', 'guestId', 'trackId', 'trackName', 'artists', 'spotifyUrl'];
+/**
+ * Las recomendaciones son anónimas: quien recomienda una canción todavía no
+ * existe como invitado, porque la fila recién se crea al confirmar.
+ * @const {Array<string>}
+ */
+var SONG_RECS_HEADERS = ['timestamp', 'trackId', 'trackName', 'artists', 'spotifyUrl'];
 
 /**
  * Las mesas del salón. `number` es lo que se guarda junto a cada invitado, así
@@ -88,6 +88,19 @@ var SETTINGS_HEADERS = ['key', 'value'];
  */
 var ADMIN_PASSPHRASE_KEY = 'ADMIN_PASSPHRASE';
 
+/**
+ * Código de la invitación. Se autogenera en `setup()` la primera vez y viaja
+ * en la URL como ?code=... Sirve para que quien entre al dominio de casualidad
+ * no vea la invitación; NO es autenticación: se reenvía por WhatsApp y se le
+ * puede sacar una captura. Lo que compra es que la lista de invitados no sea
+ * enumerable — `listGuests` sigue detrás de la contraseña de admin.
+ *
+ * CUIDADO: borrar o rotar esta property invalida todos los links ya mandados,
+ * sin aviso ni forma de recuperarlos.
+ * @const {string}
+ */
+var INVITE_CODE_KEY = 'INVITE_CODE';
+
 /** @const {string} */ var SPOTIFY_CLIENT_ID_KEY = 'SPOTIFY_CLIENT_ID';
 /** @const {string} */ var SPOTIFY_CLIENT_SECRET_KEY = 'SPOTIFY_CLIENT_SECRET';
 /** @const {string} */ var SPOTIFY_TOKEN_CACHE_KEY = 'SPOTIFY_TOKEN';
@@ -105,7 +118,7 @@ var ADMIN_PASSPHRASE_KEY = 'ADMIN_PASSPHRASE';
  * deployment" mints a second URL instead of updating the one the app calls.
  * @const {string}
  */
-var CODE_VERSION = '2026-08-11.4';
+var CODE_VERSION = '2026-08-12.1';
 
 // ---------- Public bootstrap ----------
 
@@ -114,13 +127,15 @@ var CODE_VERSION = '2026-08-11.4';
  * if they are missing. Safe to call repeatedly.
  */
 function setup() {
-  migrateGuestsFromPlusOnes_();
-  migrateGroupColumnToTable_();
+  // Las migraciones van ANTES de ensureSheetWithHeaders_: esa función solo
+  // compara y pisa la fila de headers, así que si corriera primero dejaría los
+  // datos viejos reetiquetados en silencio, leyendo `adultSlots` como `cedula`.
+  migrateGuestsToSelfRegistration_();
   ensureSheetWithHeaders_(GUESTS_TAB, GUESTS_HEADERS);
-  migrateRsvpHistoryIntoGuests_();
-  dropLegacyRsvpsSheet_();
   ensureTextColumns_();
+  migrateSongRecsDropGuestId_();
   ensureSheetWithHeaders_(SONG_RECS_TAB, SONG_RECS_HEADERS);
+  ensureInviteCode_();
   ensureSheetWithHeaders_(TABLES_TAB, TABLES_HEADERS);
   seedDefaultTables_();
   ensureSheetWithHeaders_(SETTINGS_TAB, SETTINGS_HEADERS);
@@ -147,6 +162,122 @@ function dropConflictSheets_() {
       }
     }
   }
+}
+
+/** @const {string} */ var GUESTS_SCHEMA_KEY = 'GUESTS_SCHEMA';
+
+/**
+ * Migra la pestaña `guests` del modelo de cupos al de auto-registro.
+ *
+ * Esquema viejo: id, name, adultSlots, kidSlots, invitationSent, response,
+ * adultsConfirmed, kidsConfirmed, comment, rsvpTimestamp, contact, notes,
+ * side, table.
+ *
+ * Se detecta por el header, no solo por la Script Property, para que sobreviva
+ * a restaurar la hoja desde el historial de versiones. La property es un atajo
+ * para no leer el header en cada request.
+ *
+ * Los cupos de quien todavía no respondió pasan a ser la cantidad esperada de
+ * gente: es el dato con el que el admin venía contando lugares, y perderlo
+ * dejaría las mesas mal calculadas.
+ */
+function migrateGuestsToSelfRegistration_() {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty(GUESTS_SCHEMA_KEY)) return;
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(GUESTS_TAB);
+  if (!sheet || sheet.getLastColumn() < 3) {
+    props.setProperty(GUESTS_SCHEMA_KEY, 'v2');
+    return;
+  }
+
+  // El lock evita que dos requests simultáneos hagan clear() entre el clear y
+  // el setValues del otro, que vaciaría la hoja. `setup` corre antes del
+  // dispatch, así que este lock siempre está cerrado cuando los handlers abren
+  // el suyo: el de Apps Script no es reentrante y anidarlo tira "servidor
+  // ocupado" a los 10 segundos.
+  withWriteLock_(function () {
+    var headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    if (headerRow[2] !== 'adultSlots') {
+      props.setProperty(GUESTS_SCHEMA_KEY, 'v2');
+      return;
+    }
+    var lastRow = sheet.getLastRow();
+    var data = lastRow >= 2 ? sheet.getRange(2, 1, lastRow - 1, 14).getValues() : [];
+    var migrated = data.map(function (r) {
+      var response = String(r[5] || '');
+      var expectedAdults = response === 'accept' ? r[6] : (response === 'decline' ? 0 : r[2]);
+      var expectedKids = response === 'accept' ? r[7] : (response === 'decline' ? 0 : r[3]);
+      return [
+        r[0],               // id
+        r[1],               // name
+        '',                 // cedula: los que ya existían se cargaron a mano
+        response,
+        Math.max(0, Number(expectedAdults) || 0),
+        Math.max(0, Number(expectedKids) || 0),
+        r[8],               // comment
+        r[9],               // rsvpTimestamp
+        r[10],              // contact
+        r[11],              // notes
+        r[13],              // table
+      ];
+    });
+
+    // clear() y no clearContents(): hay que borrar las tres columnas sobrantes,
+    // porque readSheet_ lee getLastColumn() y no GUESTS_HEADERS.length.
+    sheet.clear();
+    sheet.getRange(1, 1, 1, GUESTS_HEADERS.length).setValues([GUESTS_HEADERS]);
+    if (migrated.length > 0) {
+      sheet.getRange(2, 1, migrated.length, GUESTS_HEADERS.length).setValues(migrated);
+    }
+    sheet.setFrozenRows(1);
+    // clear() se llevó los formatos, así que hay que reponerlos acá mismo.
+    applyGuestTextFormats_(sheet);
+    props.setProperty(GUESTS_SCHEMA_KEY, 'v2');
+  });
+}
+
+/** Deja en formato texto las columnas de texto libre de `guests`. */
+function applyGuestTextFormats_(sheet) {
+  var rowCount = sheet.getMaxRows() - 1;
+  if (rowCount < 1) return;
+  for (var i = 0; i < TEXT_COLUMNS_.length; i++) {
+    sheet.getRange(2, TEXT_COLUMNS_[i], rowCount, 1).setNumberFormat('@');
+  }
+}
+
+/** Saca la columna `guestId`: las recomendaciones pasaron a ser anónimas. */
+function migrateSongRecsDropGuestId_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SONG_RECS_TAB);
+  if (!sheet || sheet.getLastColumn() < 2) return;
+  if (sheet.getRange(1, 2).getValue() !== 'guestId') return;
+  withWriteLock_(function () {
+    if (sheet.getRange(1, 2).getValue() !== 'guestId') return;
+    var lastRow = sheet.getLastRow();
+    var data = lastRow >= 2 ? sheet.getRange(2, 1, lastRow - 1, 6).getValues() : [];
+    var migrated = data.map(function (r) {
+      return [r[0], r[2], r[3], r[4], r[5]];
+    });
+    sheet.clear();
+    sheet.getRange(1, 1, 1, SONG_RECS_HEADERS.length).setValues([SONG_RECS_HEADERS]);
+    if (migrated.length > 0) {
+      sheet.getRange(2, 1, migrated.length, SONG_RECS_HEADERS.length).setValues(migrated);
+    }
+    sheet.setFrozenRows(1);
+  });
+}
+
+/**
+ * Genera el código de la invitación la primera vez. Toma el lock solo cuando
+ * falta, para no pagarlo en cada request.
+ */
+function ensureInviteCode_() {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty(INVITE_CODE_KEY)) return;
+  withWriteLock_(function () {
+    if (props.getProperty(INVITE_CODE_KEY)) return;
+    props.setProperty(INVITE_CODE_KEY, Utilities.getUuid());
+  });
 }
 
 /** @const {number} */ var DEFAULT_TABLE_COUNT = 20;
@@ -188,35 +319,7 @@ function ensureSettingsTextColumn_() {
   sheet.getRange(2, 1, rowCount, 2).setNumberFormat('@');
 }
 
-/**
- * Guests used to be tagged with a free-text group name; they are now seated at
- * a numbered table, in the same column. Renaming the header alone would leave
- * group names like "Amigos 2inn" sitting in a column that now means a table
- * number, so the old values are cleared. Idempotent: once the header reads
- * `table`, this is a no-op.
- */
-function migrateGroupColumnToTable_() {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(GUESTS_TAB);
-  if (!sheet) return;
-  var column = GUESTS_HEADERS.length; // `table` is the last column
-  if (sheet.getLastColumn() < column) return;
-  if (sheet.getRange(1, column).getValue() !== 'group') return;
-  var lastRow = sheet.getLastRow();
-  if (lastRow >= 2) sheet.getRange(2, column, lastRow - 1, 1).clearContent();
-  sheet.getRange(1, column).setValue('table');
-}
 
-/**
- * Deletes the legacy `rsvps` tab. Runs right after
- * migrateRsvpHistoryIntoGuests_ so anything still worth keeping has already
- * been folded into `guests`. The app writes RSVPs only into `guests` now, so
- * the tab can only reappear if an older deployment is still being served.
- */
-function dropLegacyRsvpsSheet_() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(LEGACY_RSVPS_TAB);
-  if (sheet) ss.deleteSheet(sheet);
-}
 
 /**
  * Columns holding free text (name, comment, contact, notes, table) are forced
@@ -229,12 +332,15 @@ function dropLegacyRsvpsSheet_() {
  * triggers a reformat on the next request.
  * @const {Array<number>} 1-based indexes into GUESTS_HEADERS.
  */
-var TEXT_COLUMNS_ = [2, 9, 11, 12, 14];
+var TEXT_COLUMNS_ = [2, 3, 7, 9, 10, 11];
+
+/** Índice de `cedula` dentro de TEXT_COLUMNS_: es la que decide el guard. */
+var CEDULA_COLUMN_ = 3;
 
 function ensureTextColumns_() {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(GUESTS_TAB);
   if (!sheet) return;
-  if (sheet.getRange(2, TEXT_COLUMNS_[TEXT_COLUMNS_.length - 1]).getNumberFormat() === '@') return;
+  if (sheet.getRange(2, CEDULA_COLUMN_).getNumberFormat() === '@') return;
   var rowCount = sheet.getMaxRows() - 1;
   if (rowCount < 1) return;
   for (var i = 0; i < TEXT_COLUMNS_.length; i++) {
@@ -242,105 +348,7 @@ function ensureTextColumns_() {
   }
 }
 
-/**
- * Migration from the old guest schema:
- *   [id, name, plusOnes, invitationSent, contact, notes]
- * to the new one:
- *   [id, name, adultSlots, kidSlots, invitationSent, response,
- *    adultsConfirmed, kidsConfirmed, comment, rsvpTimestamp,
- *    contact, notes, side]
- * Converts plusOnes (extras beyond the named invitee) into adultSlots (total
- * adults, including the invitee) and seeds kidSlots = 0. Idempotent: if the
- * sheet is missing, empty, or already on the new schema, this is a no-op.
- */
-function migrateGuestsFromPlusOnes_() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(GUESTS_TAB);
-  if (!sheet || sheet.getLastColumn() < 3) return;
-  var headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  if (headerRow[2] !== 'plusOnes') return;
-  var lastRow = sheet.getLastRow();
-  var data = lastRow >= 2 ? sheet.getRange(2, 1, lastRow - 1, 6).getValues() : [];
-  var migrated = data.map(function (r) {
-    return [
-      r[0],
-      r[1],
-      (Number(r[2]) || 0) + 1,
-      0,
-      r[3],
-      '',
-      0,
-      0,
-      '',
-      '',
-      r[4],
-      r[5],
-      '',
-      '',
-    ];
-  });
-  sheet.clear();
-  sheet.getRange(1, 1, 1, GUESTS_HEADERS.length).setValues([GUESTS_HEADERS]);
-  if (migrated.length > 0) {
-    sheet.getRange(2, 1, migrated.length, GUESTS_HEADERS.length).setValues(migrated);
-  }
-  sheet.setFrozenRows(1);
-}
 
-/**
- * One-time migration that takes the latest RSVP per guest from the historical
- * `rsvps` sheet and stores it as the current RSVP snapshot inside `guests`.
- * Idempotent: if guests already have response data, this is a no-op.
- */
-function migrateRsvpHistoryIntoGuests_() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var guestsSheet = ss.getSheetByName(GUESTS_TAB);
-  var rsvpsSheet = ss.getSheetByName(LEGACY_RSVPS_TAB);
-  if (!guestsSheet || !rsvpsSheet || guestsSheet.getLastRow() < 2 || rsvpsSheet.getLastRow() < 2) return;
-
-  var guestValues = guestsSheet.getRange(2, 1, guestsSheet.getLastRow() - 1, GUESTS_HEADERS.length).getValues();
-  var responseCol = 5;
-  var hasAnyResponse = false;
-  for (var i = 0; i < guestValues.length; i++) {
-    if (String(guestValues[i][responseCol] || '').trim()) {
-      hasAnyResponse = true;
-      break;
-    }
-  }
-  if (hasAnyResponse) return;
-
-  var rsvpRows = rsvpsSheet.getRange(2, 1, rsvpsSheet.getLastRow() - 1, rsvpsSheet.getLastColumn()).getValues();
-  var latestByGuest = {};
-  for (var r = 0; r < rsvpRows.length; r++) {
-    var row = rsvpRows[r];
-    var guestId = String(row[1] || '');
-    if (!guestId) continue;
-    var ts = row[0] instanceof Date ? row[0].getTime() : new Date(String(row[0] || '')).getTime();
-    var prev = latestByGuest[guestId];
-    if (!prev || ts > prev.ts) {
-      latestByGuest[guestId] = {
-        ts: ts,
-        rawTs: row[0],
-        response: String(row[2] || ''),
-        adultsConfirmed: Number(row[3] || 0),
-        kidsConfirmed: Number(row[4] || 0),
-        comment: String(row[5] || ''),
-      };
-    }
-  }
-
-  for (var g = 0; g < guestValues.length; g++) {
-    var guestId = String(guestValues[g][0] || '');
-    var latest = latestByGuest[guestId];
-    if (!latest) continue;
-    guestValues[g][5] = latest.response;
-    guestValues[g][6] = latest.adultsConfirmed;
-    guestValues[g][7] = latest.kidsConfirmed;
-    guestValues[g][8] = latest.comment;
-    guestValues[g][9] = latest.rawTs;
-  }
-  guestsSheet.getRange(2, 1, guestValues.length, GUESTS_HEADERS.length).setValues(guestValues);
-}
 
 // ---------- Router ----------
 
@@ -391,11 +399,13 @@ var HANDLERS_ = {
       return s.getName();
     }) };
   },
-  getGuest: function (params) {
-    return handleGetGuest_(params);
-  },
-  getSettings: function () {
+  getSettings: function (params) {
+    requirePublicAccess_(params);
     return { settings: readSettings_() };
+  },
+  getInviteCode: function (params) {
+    requireAdmin_(params);
+    return { code: getInviteCode_() };
   },
   listTables: function (params) {
     requireAdmin_(params);
@@ -417,6 +427,7 @@ var HANDLERS_ = {
     return handleSubmitRsvp_(params);
   },
   searchSongs: function (params) {
+    requirePublicAccess_(params);
     return handleSearchSongs_(params);
   },
   submitSongRecommendation: function (params) {
@@ -518,6 +529,56 @@ function requireAdmin_(params) {
 }
 
 /**
+ * Deja pasar a quien traiga el código de la invitación o la contraseña de
+ * admin. El panel usa la contraseña para no tener que conocer el código.
+ *
+ * El mensaje de error NO puede contener la palabra "passphrase": el admin
+ * detecta credencial inválida buscando esa palabra en el mensaje, y
+ * deslogearía a Seba y Emi por un código equivocado de un invitado.
+ * @param {Object} params
+ */
+function requirePublicAccess_(params) {
+  var code = String(params.code || '').trim();
+  if (code && code === getInviteCode_()) return;
+  var supplied = String(params.auth || '');
+  if (supplied && supplied === getAdminPassphrase_()) return;
+  throw new Error('código de invitación inválido');
+}
+
+/** @returns {string} */
+function getInviteCode_() {
+  ensureInviteCode_();
+  return PropertiesService.getScriptProperties().getProperty(INVITE_CODE_KEY) || '';
+}
+
+/**
+ * Cédula uruguaya en forma canónica: 8 dígitos con ceros a la izquierda.
+ * Sin el relleno, "1234561" y "01234561" serían la misma persona y dos claves
+ * distintas, y la unicidad fallaría en silencio.
+ *
+ * ESPEJO de src/lib/cedula.ts. Si cambia una, cambia la otra; los casos de
+ * prueba están en src/lib/cedula.test.ts y valen para las dos.
+ * @param {*} raw
+ * @returns {string} "" si no es normalizable.
+ */
+function normalizeCedula_(raw) {
+  var digits = String(raw == null ? '' : raw).replace(/\D/g, '');
+  if (digits.length < 6 || digits.length > 8) return '';
+  while (digits.length < 8) digits = '0' + digits;
+  return digits;
+}
+
+/** Valida el dígito verificador. Espejo de isValidCedula en src/lib/cedula.ts. */
+function isValidCedula_(raw) {
+  var digits = normalizeCedula_(raw);
+  if (!digits) return false;
+  var weights = [2, 9, 8, 7, 6, 3, 4];
+  var sum = 0;
+  for (var i = 0; i < weights.length; i++) sum += Number(digits.charAt(i)) * weights[i];
+  return (10 - (sum % 10)) % 10 === Number(digits.charAt(7));
+}
+
+/**
  * Read the admin passphrase from PropertiesService. Throws if not set.
  * @returns {string}
  */
@@ -571,70 +632,88 @@ function getSpotifyToken_() {
 
 // ---------- Handlers ----------
 
-/**
- * Public read for the guest page. Returns only the fields the guest needs to
- * see and never reveals the full list.
- * @param {Object} params
- * @returns {{found: boolean, guest?: {id: string, name: string, plusOnes: number}}}
- */
-function handleGetGuest_(params) {
-  var id = requireString_(params, 'id');
-  var guest = findGuestById_(id);
-  if (!guest) return { found: false, settings: readSettings_() };
-  return {
-    found: true,
-    settings: readSettings_(),
-    guest: {
-      id: guest.id,
-      name: guest.name,
-      adultSlots: guest.adultSlots,
-      kidSlots: guest.kidSlots,
-    },
-  };
-}
+
+/** @const {number} */ var MAX_PARTY_ADULTS_ = 10;
+/** @const {number} */ var MAX_PARTY_KIDS_ = 10;
 
 /**
+ * Confirmación del invitado, que se registra solo.
+ *
+ * La fila se crea acá: antes de confirmar, la persona no existe. La cédula es
+ * la clave — si ya confirmó y vuelve a completar el formulario, se actualiza su
+ * fila en lugar de duplicarla.
+ *
+ * Todo el ciclo leer-decidir-escribir va dentro del lock: si la búsqueda
+ * quedara afuera, dos envíos simultáneos de la misma cédula crearían dos filas.
+ *
+ * Al pisar una fila existente se conservan `table`, `contact` y `notes`, que
+ * son del admin: reeditar la confirmación no tiene por qué desentar a nadie.
+ *
+ * Nota: quien tenga el código puede pisar la confirmación de otro si conoce su
+ * cédula. Es un compromiso aceptado — no puede leerla, solo sobrescribirla, y
+ * las filas que carga el admin no tienen cédula, así que no son alcanzables.
  * @param {Object} params
- * @returns {{ok: true}}
+ * @returns {{ok: true, created: boolean}}
  */
 function handleSubmitRsvp_(params) {
-  var id = requireString_(params, 'id');
+  requirePublicAccess_(params);
+  var name = requireString_(params, 'name').replace(/\s+/g, ' ').slice(0, 80);
+  var cedula = normalizeCedula_(requireString_(params, 'cedula'));
+  if (!isValidCedula_(cedula)) throw new Error('cédula inválida');
+
   var response = requireString_(params, 'response');
   if (response !== RESPONSE_ACCEPT && response !== RESPONSE_DECLINE) {
     throw new Error('invalid response: ' + response);
   }
-  var guest = findGuestById_(id);
-  if (!guest) throw new Error('guest not found');
-
   var adultsConfirmed = 0;
   var kidsConfirmed = 0;
   if (response === RESPONSE_ACCEPT) {
-    adultsConfirmed = requireInt_(params, 'adultsConfirmed', 1, guest.adultSlots);
-    kidsConfirmed = requireInt_(params, 'kidsConfirmed', 0, guest.kidSlots);
+    adultsConfirmed = requireInt_(params, 'adultsConfirmed', 1, MAX_PARTY_ADULTS_);
+    kidsConfirmed = requireInt_(params, 'kidsConfirmed', 0, MAX_PARTY_KIDS_);
   }
-  var comment = params.comment == null ? '' : String(params.comment);
+  var comment = params.comment == null ? '' : String(params.comment).slice(0, 500);
 
   return withWriteLock_(function () {
     var sheet = sheetByName_(GUESTS_TAB);
+    var existing = findByCedula_(readGuests_(), cedula);
     var row = [
-      guest.id,
-      guest.name,
-      guest.adultSlots,
-      guest.kidSlots,
-      guest.invitationSent,
+      existing ? existing.id : Utilities.getUuid(),
+      name,
+      cedula,
       response,
       adultsConfirmed,
       kidsConfirmed,
       comment,
       new Date(),
-      guest.contact,
-      guest.notes,
-      guest.side,
-      guest.table,
+      existing ? existing.contact : '',
+      existing ? existing.notes : '',
+      existing ? existing.table : '',
     ];
-    sheet.getRange(guest.rowIndex, 1, 1, row.length).setValues([row]);
-    return { ok: true };
+    if (existing) {
+      sheet.getRange(existing.rowIndex, 1, 1, row.length).setValues([row]);
+      return { ok: true, created: false };
+    }
+    sheet.appendRow(row);
+    // La fila recién agregada puede caer más allá del rango que formateó
+    // ensureTextColumns_, y sin formato de texto la cédula pierde los ceros.
+    applyGuestTextFormats_(sheet);
+    return { ok: true, created: true };
   });
+}
+
+/**
+ * Busca por cédula normalizando también lo que está en la planilla, para
+ * tolerar una tipeada a mano con puntos.
+ * @param {Array<Guest>} list
+ * @param {string} cedula
+ * @returns {Guest|null}
+ */
+function findByCedula_(list, cedula) {
+  if (!cedula) return null;
+  for (var i = 0; i < list.length; i++) {
+    if (normalizeCedula_(list[i].cedula) === cedula) return list[i];
+  }
+  return null;
 }
 
 /**
@@ -677,32 +756,38 @@ function handleSearchSongs_(params) {
 }
 
 /**
- * Append a song recommendation row for the given guest.
+ * Guarda una recomendación de canción. Es anónima: quien la manda todavía no
+ * existe como invitado, porque la fila se crea recién al confirmar.
  * @param {Object} params
  * @returns {{ok: true}}
  */
 function handleSubmitSongRecommendation_(params) {
-  var guestId = requireString_(params, 'id');
+  requirePublicAccess_(params);
   var trackId = requireString_(params, 'trackId');
   var trackName = requireString_(params, 'trackName');
   var artists = String(params.artists || '');
   var spotifyUrl = String(params.spotifyUrl || '');
 
-  var guest = findGuestById_(guestId);
-  if (!guest) throw new Error('guest not found');
-
   return withWriteLock_(function () {
     sheetByName_(SONG_RECS_TAB).appendRow([
-      new Date(), guestId, trackId, trackName, artists, spotifyUrl,
+      new Date(), trackId, trackName, artists, spotifyUrl,
     ]);
     return { ok: true };
   });
 }
 
 /**
- * Upsert by id. If id is empty, generate a random UUID so guest links can't
- * be guessed from names. Serialized via the script lock so concurrent writes
- * can't collide on row indexes.
+ * Alta y edición desde el admin. Sirve además para confirmar por otra persona:
+ * la gente mayor a la que no se le manda el link se carga acá con su respuesta
+ * y su cantidad de gente ya puesta.
+ *
+ * A diferencia del modelo anterior, el admin es dueño de `response` y de los
+ * confirmados: no se preservan de la fila existente, se pisan con lo que
+ * mande. Si el invitado y el admin editan a la vez, gana el último; los dos
+ * caminos toman el mismo lock, así que no hay corrupción.
+ *
+ * La cédula es opcional —los cargados a mano no la tienen— pero si viene, tiene
+ * que ser válida y no puede pertenecer a otra fila.
  * @param {Object} params
  * @returns {{ok: true, created: boolean, id: string}}
  */
@@ -710,16 +795,18 @@ function handleUpsertGuest_(params) {
   var input = params.guest || {};
   var name = requireString_(input, 'name');
   var providedId = String(input.id || '').trim();
-  var adultSlots = Math.max(1, Math.round(Number(input.adultSlots) || 1));
-  var kidSlots = Math.max(0, Math.round(Number(input.kidSlots) || 0));
-  var invitationSent = Boolean(input.invitationSent);
-  // La lista de lados vive en src/config.ts. Este endpoint pide auth de admin,
-  // así que alcanza con normalizar y acotar el largo en vez de whitelistear.
-  var side = String(input.side || '').trim().toLowerCase().slice(0, 32);
+  var cedula = normalizeCedula_(input.cedula);
+  if (String(input.cedula || '').trim() && !isValidCedula_(cedula)) {
+    throw new Error('cédula inválida');
+  }
+  var response = String(input.response || '').trim();
+  if (response !== RESPONSE_ACCEPT && response !== RESPONSE_DECLINE) response = '';
+  var adultsConfirmed = Math.max(0, Math.round(Number(input.adultsConfirmed) || 0));
+  var kidsConfirmed = Math.max(0, Math.round(Number(input.kidsConfirmed) || 0));
   var contact = input.contact == null ? '' : String(input.contact);
   var notes = input.notes == null ? '' : String(input.notes);
-  // Free text on purpose: the table list lives in the frontend, and a value
-  // typed straight into the sheet should survive an edit from the admin.
+  // Texto libre a propósito: la lista de mesas vive en el frontend, y un valor
+  // tipeado directo en la planilla tiene que sobrevivir a una edición.
   var table = input.table == null ? '' : String(input.table).trim();
 
   return withWriteLock_(function () {
@@ -727,20 +814,23 @@ function handleUpsertGuest_(params) {
     var list = readGuests_();
     var id = providedId || Utilities.getUuid();
     var existing = findInList_(list, id);
+    if (cedula) {
+      var owner = findByCedula_(list, cedula);
+      if (owner && owner.id !== id) {
+        throw new Error('ya hay un invitado con esa cédula: ' + owner.name);
+      }
+    }
     var row = [
       id,
       name,
-      adultSlots,
-      kidSlots,
-      invitationSent,
-      existing ? existing.response : '',
-      existing ? existing.adultsConfirmed : 0,
-      existing ? existing.kidsConfirmed : 0,
+      cedula,
+      response,
+      adultsConfirmed,
+      kidsConfirmed,
       existing ? existing.comment : '',
       existing ? existing.rsvpTimestamp : '',
       contact,
       notes,
-      side,
       table,
     ];
     if (existing) {
@@ -748,6 +838,7 @@ function handleUpsertGuest_(params) {
       return { ok: true, created: false, id: id };
     }
     sheet.appendRow(row);
+    applyGuestTextFormats_(sheet);
     return { ok: true, created: true, id: id };
   });
 }
@@ -975,11 +1066,10 @@ function ensureSheetWithHeaders_(name, headers) {
 }
 
 /**
- * @typedef {{rowIndex: number, id: string, name: string, adultSlots: number,
- *           kidSlots: number, invitationSent: boolean, response: string,
- *           adultsConfirmed: number, kidsConfirmed: number, comment: string,
- *           rsvpTimestamp: string, contact: string, notes: string,
- *           side: string, table: string}} Guest
+ * @typedef {{rowIndex: number, id: string, name: string, cedula: string,
+ *           response: string, adultsConfirmed: number, kidsConfirmed: number,
+ *           comment: string, rsvpTimestamp: string, contact: string,
+ *           notes: string, table: string}} Guest
  */
 
 /**
@@ -990,7 +1080,7 @@ function readGuests_() {
 }
 
 /**
- * @typedef {{timestamp: string, guestId: string, trackId: string,
+ * @typedef {{rowIndex: number, timestamp: string, trackId: string,
  *           trackName: string, artists: string, spotifyUrl: string}} SongRec
  */
 
@@ -1010,11 +1100,10 @@ function mapSongRecRow_(row, rowIndex) {
   return {
     rowIndex: rowIndex,
     timestamp: ts instanceof Date ? ts.toISOString() : String(ts || ''),
-    guestId: String(row[1] || ''),
-    trackId: String(row[2] || ''),
-    trackName: String(row[3] || ''),
-    artists: String(row[4] || ''),
-    spotifyUrl: String(row[5] || ''),
+    trackId: String(row[1] || ''),
+    trackName: String(row[2] || ''),
+    artists: String(row[3] || ''),
+    spotifyUrl: String(row[4] || ''),
   };
 }
 
@@ -1042,18 +1131,15 @@ function mapGuestRow_(row, rowIndex) {
     rowIndex: rowIndex,
     id: String(row[0] || ''),
     name: String(row[1] || ''),
-    adultSlots: Math.max(1, Number(row[2] || 1)),
-    kidSlots: Math.max(0, Number(row[3] || 0)),
-    invitationSent: row[4] === true || row[4] === 'TRUE' || row[4] === 'true',
-    response: String(row[5] || ''),
-    adultsConfirmed: Math.max(0, Number(row[6] || 0)),
-    kidsConfirmed: Math.max(0, Number(row[7] || 0)),
-    comment: String(row[8] || ''),
-    rsvpTimestamp: row[9] instanceof Date ? row[9].toISOString() : String(row[9] || ''),
-    contact: String(row[10] || ''),
-    notes: String(row[11] || ''),
-    side: String(row[12] || ''),
-    table: String(row[13] || ''),
+    cedula: String(row[2] || ''),
+    response: String(row[3] || ''),
+    adultsConfirmed: Math.max(0, Number(row[4] || 0)),
+    kidsConfirmed: Math.max(0, Number(row[5] || 0)),
+    comment: String(row[6] || ''),
+    rsvpTimestamp: row[7] instanceof Date ? row[7].toISOString() : String(row[7] || ''),
+    contact: String(row[8] || ''),
+    notes: String(row[9] || ''),
+    table: String(row[10] || ''),
   };
 }
 
