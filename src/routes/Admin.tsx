@@ -1779,20 +1779,9 @@ function InvitationTab({
 
       {draft.events.map((occurrence, index) => (
         <div key={index} className="bg-white border border-bone rounded-lg shadow-sm p-5 mb-5 grid gap-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-[0.78rem] uppercase tracking-[0.22em] text-muted font-medium m-0">
-              Evento {index + 1}
-            </h3>
-            <button
-              type="button"
-              className="icon-action icon-action--danger"
-              title="Borrar este evento"
-              aria-label={`Borrar el evento ${index + 1}`}
-              onClick={() => set("events", draft.events.filter((_, i) => i !== index))}
-            >
-              <LuTrash2 size={16} aria-hidden="true" />
-            </button>
-          </div>
+          <h3 className="text-[0.78rem] uppercase tracking-[0.22em] text-muted font-medium m-0">
+            Evento {index + 1}
+          </h3>
           <InvitationField
             label="Título"
             value={occurrence.label}
@@ -1899,24 +1888,11 @@ function InvitationTab({
               value={account.value}
               onChange={(v) => setAccount(index, { value: v })}
             />
-            <div className="flex items-end gap-2">
-              <div className="flex-1">
-                <InvitationField
-                  label="Titular"
-                  value={account.holder}
-                  onChange={(v) => setAccount(index, { holder: v })}
-                />
-              </div>
-              <button
-                type="button"
-                className="icon-action icon-action--danger mb-1"
-                title="Borrar esta cuenta"
-                aria-label={`Borrar la cuenta ${account.bank}`}
-                onClick={() => set("giftAccounts", draft.giftAccounts.filter((_, i) => i !== index))}
-              >
-                <LuTrash2 size={16} aria-hidden="true" />
-              </button>
-            </div>
+            <InvitationField
+              label="Titular"
+              value={account.holder}
+              onChange={(v) => setAccount(index, { holder: v })}
+            />
           </div>
         ))}
         <InvitationField

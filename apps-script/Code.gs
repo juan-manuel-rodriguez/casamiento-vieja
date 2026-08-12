@@ -116,7 +116,7 @@ var INVITE_CODE_KEY = 'INVITE_CODE';
  * deployment" mints a second URL instead of updating the one the app calls.
  * @const {string}
  */
-var CODE_VERSION = '2026-08-12.2';
+var CODE_VERSION = '2026-08-12.3';
 
 // ---------- Public bootstrap ----------
 
@@ -232,12 +232,14 @@ function migrateGuestsToSelfRegistration_() {
     // porque readSheet_ lee getLastColumn() y no la cantidad de headers.
     sheet.clear();
     sheet.getRange(1, 1, 1, v2Headers.length).setValues([v2Headers]);
+    // clear() se llevó los formatos y hay que reponerlos ANTES de escribir:
+    // si no, el teléfono que viene en `contact` pierde el cero inicial.
+    // Las columnas son las de este esquema intermedio, no las de hoy.
+    applyGuestTextFormats_(sheet, [2, 3, 7, 9, 10, 11]);
     if (migrated.length > 0) {
       sheet.getRange(2, 1, migrated.length, v2Headers.length).setValues(migrated);
     }
     sheet.setFrozenRows(1);
-    // clear() se llevó los formatos, así que hay que reponerlos acá mismo.
-    applyGuestTextFormats_(sheet);
     props.setProperty(GUESTS_SCHEMA_KEY, 'v2');
   });
 }
@@ -288,22 +290,52 @@ function migrateGuestsCedulaToPhone_() {
 
     sheet.clear();
     sheet.getRange(1, 1, 1, GUESTS_HEADERS.length).setValues([GUESTS_HEADERS]);
+    applyGuestTextFormats_(sheet);
     if (migrated.length > 0) {
       sheet.getRange(2, 1, migrated.length, GUESTS_HEADERS.length).setValues(migrated);
     }
     sheet.setFrozenRows(1);
-    applyGuestTextFormats_(sheet);
     props.setProperty(GUESTS_PHONE_KEY, 'v3');
   });
 }
 
-/** Deja en formato texto las columnas de texto libre de `guests`. */
-function applyGuestTextFormats_(sheet) {
+/**
+ * Deja en formato texto las columnas de texto libre de `guests`.
+ *
+ * Hay que llamarla ANTES de escribir los datos: si la celda no es texto,
+ * Sheets interpreta "098230013" como el número 98230013 y el cero inicial no
+ * se recupera formateando después.
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {Array<number>=} columns Por defecto las del esquema actual. Las
+ *   migraciones pasan las suyas, porque el esquema intermedio tiene otras.
+ */
+function applyGuestTextFormats_(sheet, columns) {
+  var cols = columns || TEXT_COLUMNS_;
   var rowCount = sheet.getMaxRows() - 1;
   if (rowCount < 1) return;
-  for (var i = 0; i < TEXT_COLUMNS_.length; i++) {
-    sheet.getRange(2, TEXT_COLUMNS_[i], rowCount, 1).setNumberFormat('@');
+  for (var i = 0; i < cols.length; i++) {
+    sheet.getRange(2, cols[i], rowCount, 1).setNumberFormat('@');
   }
+}
+
+/**
+ * Agrega una fila de invitado formateando ANTES de escribir.
+ *
+ * Con `appendRow` el valor entra primero y el formato después, así que Sheets
+ * alcanza a interpretar el teléfono como número y "098230013" se guarda como
+ * 98230013. El cero perdido no se recupera formateando después: hay que llegar
+ * antes que la escritura.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {Array<*>} row
+ */
+function appendGuestRow_(sheet, row) {
+  var target = sheet.getLastRow() + 1;
+  if (target > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), 1);
+  for (var i = 0; i < TEXT_COLUMNS_.length; i++) {
+    sheet.getRange(target, TEXT_COLUMNS_[i]).setNumberFormat('@');
+  }
+  sheet.getRange(target, 1, 1, row.length).setValues([row]);
 }
 
 /** Saca la columna `guestId`: las recomendaciones pasaron a ser anónimas. */
@@ -757,11 +789,7 @@ function handleSubmitRsvp_(params) {
       sheet.getRange(existing.rowIndex, 1, 1, row.length).setValues([row]);
       return { ok: true, created: false };
     }
-    sheet.appendRow(row);
-    // La fila recién agregada puede caer más allá del rango que formateó
-    // ensureTextColumns_, y sin formato de texto el teléfono se guarda como
-    // número y pierde el cero inicial.
-    applyGuestTextFormats_(sheet);
+    appendGuestRow_(sheet, row);
     return { ok: true, created: true };
   });
 }
@@ -900,8 +928,7 @@ function handleUpsertGuest_(params) {
       sheet.getRange(existing.rowIndex, 1, 1, row.length).setValues([row]);
       return { ok: true, created: false, id: id };
     }
-    sheet.appendRow(row);
-    applyGuestTextFormats_(sheet);
+    appendGuestRow_(sheet, row);
     return { ok: true, created: true, id: id };
   });
 }

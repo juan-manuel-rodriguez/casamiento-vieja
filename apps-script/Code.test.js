@@ -27,6 +27,7 @@ function makeSheet(headers, rows) {
     getLastColumn: () => Math.max(...grid.map((r) => r.length)),
     getLastRow: () => grid.length,
     getMaxRows: () => Math.max(grid.length, 50),
+    insertRowsAfter() {},
     setFrozenRows(n) { this._frozen = n; },
     clear() { grid.length = 0; formats.clear(); },
     getRange(row, col, numRows = 1, numCols = 1) {
@@ -45,7 +46,15 @@ function makeSheet(headers, rows) {
         setValues(values) {
           values.forEach((line, r) => {
             const target = grid[row - 1 + r] || (grid[row - 1 + r] = []);
-            line.forEach((v, c) => { target[col - 1 + c] = v; });
+            line.forEach((v, c) => {
+              const cellRow = row + r;
+              const cellCol = col + c;
+              // Así se comporta Sheets: sin formato de texto, "098" entra
+              // como número 98. Es exactamente el bug que se está probando.
+              const isText = formats.get(`${cellRow}:${cellCol}`) === "@";
+              target[cellCol - 1] =
+                !isText && typeof v === "string" && /^\d+$/.test(v) ? Number(v) : v;
+            });
           });
         },
         setNumberFormat(fmt) {
@@ -243,6 +252,29 @@ function run(sheets, props = {}) {
   const manual = api.handleUpsertGuest_({ guest: { name: "Abuela", phone: "24001122", response: "accept", adultsConfirmed: 2, kidsConfirmed: 0 } });
   assert.equal(manual.created, true, "el admin da de alta con su propio teléfono");
   console.log("PASS  teléfono único entre filas");
+}
+
+// --- Caso 8: el teléfono no puede perder el cero inicial ---
+{
+  const NEW = ["id","name","phone","response","adultsConfirmed","kidsConfirmed","comment","rsvpTimestamp","notes","table"];
+  const guests = makeSheet(NEW, []);
+  const { api } = run({ guests }, { INVITE_CODE: "c", GUESTS_SCHEMA: "v2", GUESTS_PHONE_SCHEMA: "v3" });
+
+  api.handleSubmitRsvp_({ code: "c", name: "Juan Rodríguez", phone: "098230013",
+    response: "accept", adultsConfirmed: 1, kidsConfirmed: 0 });
+
+  const stored = guests._grid[1][2];
+  assert.equal(typeof stored, "string", "se guarda como texto, no como número");
+  assert.equal(stored, "098230013", "conserva el cero inicial");
+  assert.equal(api.readGuests_()[0].phone, "098230013");
+  console.log("PASS  el teléfono conserva el cero inicial y se guarda como texto");
+
+  // Y sigue siendo la misma clave al volver a confirmar.
+  const again = api.handleSubmitRsvp_({ code: "c", name: "Juan Rodríguez", phone: "098230013",
+    response: "accept", adultsConfirmed: 2, kidsConfirmed: 0, confirmReplace: true });
+  assert.equal(again.created, false, "lo reconoce, no duplica");
+  assert.equal(api.readGuests_().length, 1);
+  console.log("PASS  con el cero conservado, el número sigue siendo la misma clave");
 }
 
 console.log("\nOK: migración y auto-registro verificados");
