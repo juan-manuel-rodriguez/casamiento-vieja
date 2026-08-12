@@ -717,9 +717,6 @@ function Stats({ guests, seats }: { guests: Guest[]; seats: number }) {
       total: guests.length,
       accepted,
       declined,
-      pending: guests.length - accepted.length - declined.length,
-      // Quien tiene fecha de respuesta se anotó solo desde la invitación.
-      selfRegistered: guests.filter((g) => g.rsvpTimestamp).length,
       adultsConfirmed,
       kidsConfirmed,
     };
@@ -728,11 +725,11 @@ function Stats({ guests, seats }: { guests: Guest[]; seats: number }) {
   return (
     <section className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 mb-10">
       <StatCard label="Invitados" value={stats.total} />
-      <StatCard label="Se anotaron solos" value={stats.selfRegistered} total={stats.total} />
       <StatCard label="Vienen" value={stats.accepted.length} />
       <StatCard label="No pueden" value={stats.declined.length} />
+      {/* Las tres del conteo van juntas: adultos y niños suman personas. */}
       <StatCard label="Adultos" value={stats.adultsConfirmed} accent />
-      {/* Contra los lugares del salón: es el número con el que importa comparar. */}
+      <StatCard label="Niños" value={stats.kidsConfirmed} accent />
       <StatCard
         label="Personas"
         value={stats.adultsConfirmed + stats.kidsConfirmed}
