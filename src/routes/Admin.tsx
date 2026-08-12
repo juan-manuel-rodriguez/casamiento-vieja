@@ -475,7 +475,7 @@ export function AdminPage() {
       <div className="flex flex-wrap gap-3 items-center mb-3">
         <input
           className="w-full sm:flex-1 sm:w-auto sm:min-w-52 px-4 py-3 border border-bone rounded bg-white focus:outline-none focus:border-gold"
-          placeholder="Buscar por nombre o cédula…"
+          placeholder="Buscar por nombre o teléfono…"
           value={filters.search}
           onChange={(e) => setFilters({ ...filters, search: e.target.value })}
         />
@@ -518,7 +518,7 @@ export function AdminPage() {
       <div className="flex flex-wrap gap-3 items-center mb-4 text-sm text-muted">
         <span className="tabular-nums">
           {filtered.length === guests.length
-            ? `${guests.length} invitados`
+            ? `${guests.length} ${guests.length === 1 ? "invitado" : "invitados"}`
             : `${filtered.length} de ${guests.length} invitados`}
         </span>
         {hasActiveFilters && (
