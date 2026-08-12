@@ -150,8 +150,8 @@ export const DEFAULT_EVENT: EventConfig = {
   ],
   /** Con track hay portada: el click habilita el autoplay del reproductor. */
   spotifyTrackUrl: "https://open.spotify.com/track/5wq9WMmC3FzC7k1x6yVfAG",
-  /** Poné acá el mp3 (ej. "/cancion.mp3") y suena el tema completo. */
-  audioUrl: "",
+  /** Con audio propio suena el tema completo, desde el principio y en loop. */
+  audioUrl: "/cancion.mp3",
 };
 
 /** La ocurrencia que titula la página: la última, o sea la fiesta. */
