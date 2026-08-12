@@ -5,9 +5,6 @@
 /** Web App URL from the Apps Script deployment. Ends in /exec. */
 export const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwIRAW_3d_uhs5qNNDo3cVFFZ3awhiCSqvpdWKeqnMjmcJZKJtnxh9IWLgI4L1cjBHJ/exec";
 
-/** Who invited a guest. `value` is stored in the sheet; `label` is displayed. */
-export type InvitationSide = { value: string; label: string };
-
 /** One occurrence of the wedding: civil ceremony, party, etc. */
 export type EventOccurrence = {
   /** Script-set title of the column, e.g. "Ceremonia civil". */
@@ -42,7 +39,6 @@ export type EventConfig = {
   tagline: string;
   date: string;
   shortDate: string;
-  sides: readonly InvitationSide[];
   events: readonly EventOccurrence[];
   dressCode: string;
   dressCodeDescription: string;
@@ -82,11 +78,6 @@ export const DEFAULT_EVENT: EventConfig = {
   /** Headline date, shown in the cover and the hero: the party. */
   date: "23 de octubre de 2026",
   shortDate: "23.10.26",
-  /** Invitation sides. Keep `value` lowercase and space-free. */
-  sides: [
-    { value: "seba", label: "Seba" },
-    { value: "emi", label: "Emi" },
-  ],
   /** Occurrences in chronological order. The last one is the main event. */
   events: [
     {

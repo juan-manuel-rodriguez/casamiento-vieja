@@ -7,8 +7,18 @@ import type { EventConfig } from "../config";
  */
 export type EventOverrides = Partial<EventConfig>;
 
-export async function fetchSettings(): Promise<EventOverrides> {
-  const response = await getJson<{ settings: EventOverrides }>({ action: "getSettings" });
+/**
+ * @param access El código de la invitación en la página del invitado, o la
+ * contraseña de admin en el panel: el backend acepta cualquiera de los dos.
+ */
+export async function fetchSettings(access: string): Promise<EventOverrides> {
+  // Va en los dos campos porque el backend acepta cualquiera de los dos y acá
+  // no sabemos cuál nos tocó: el invitado trae código, el admin contraseña.
+  const response = await getJson<{ settings: EventOverrides }>({
+    action: "getSettings",
+    code: access,
+    auth: access,
+  });
   return response.settings ?? {};
 }
 

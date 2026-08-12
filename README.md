@@ -9,7 +9,9 @@ que quedó como remote `upstream`: los arreglos se traen con `git cherry-pick`.
 
 ## Arquitectura
 
-- **Frontend**: React + Vite, dos rutas: `/?id=XXX` (invitado) y `/admin`.
+- **Frontend**: React + Vite, dos rutas: `/?code=XXX` (invitado) y `/admin`.
+  El link de la invitación es **uno solo para todos**: cada persona se anota
+  sola al confirmar y su cédula es la clave que la identifica.
 - **Backend**: un Google Apps Script "container-bound" al Sheet, deployado como
   Web App. Maneja la lectura pública del invitado, la escritura del RSVP, y el
   CRUD del admin (este último validando una contraseña compartida).
@@ -25,6 +27,8 @@ estático (GitHub Pages, Netlify, Vercel).
 2. Borrá el archivo de ejemplo y pegá el contenido de
    [`apps-script/Code.gs`](apps-script/Code.gs).
 3. En ⚙ **Project Settings → Script Properties**, agregá `ADMIN_PASSPHRASE`.
+   El código de la invitación (`INVITE_CODE`) se genera solo la primera vez;
+   lo ves en el admin, arriba de todo.
 4. Guardá (💾). Elegí la función `setup` en el dropdown y dale **Run** (▶).
    Te va a pedir permisos la primera vez: aceptá. Eso crea las pestañas
   `guests` y `songRecommendations` con los headers correctos.
@@ -86,9 +90,8 @@ está en el historial de la conversación, no en el repo.
 [`index.html`](index.html)**. WhatsApp cachea la preview por URL: si la URL no
 cambia, sigue mostrando la imagen vieja aunque el archivo ya sea otro.
 
-Los links de invitado son todos distintos (`/?id=XXX`), así que a quien todavía
-no le mandaste el link le va a llegar la versión nueva igual. El cacheo solo
-afecta a los links ya compartidos.
+Ahora el link es **uno solo**, así que el cacheo de WhatsApp afecta a todos por
+igual: si ya lo compartiste y cambiás la imagen, hay que subir el `?v=` sí o sí.
 
 Para forzar el refresco de uno ya compartido: pegá la URL en el
 [Sharing Debugger de Facebook](https://developers.facebook.com/tools/debug/) y
@@ -108,20 +111,46 @@ Para ver la página del invitado sin Sheet ni nada cableado, agregá `?demo`:
 
 ## Uso
 
-- **Cargar invitados**: entrá a `/admin`, ingresá la contraseña del Apps Script
-  una vez (se guarda en el navegador), usá el form "Agregar invitado". También
-  podés editar el Sheet a mano si querés.
-- **Mandar invitaciones**: click en "Copiar link" en la fila del invitado →
-  pegá en WhatsApp/email. El link va a `/?id=<su-id>`.
-- **Ver respuestas**: el admin muestra el resumen y la última respuesta de cada
-  invitado.
+- **Mandar la invitación**: entrá a `/admin`, ingresá la contraseña del Apps
+  Script una vez (se guarda en el navegador) y copiá el link de arriba. Es el
+  mismo para todos.
+- **Los invitados se anotan solos**: al confirmar cargan nombre, cédula y
+  cuánta gente llevan, y ahí se crea su fila. Si vuelven a completar el
+  formulario con la misma cédula, se actualiza en vez de duplicarse. No se les
+  muestran los datos que habían cargado, a propósito: así con una cédula ajena
+  no se pueden espiar los datos de otro.
+- **Cargar a alguien a mano**: para la gente a la que no se le manda el link,
+  usá "Agregar invitado" y ponele la respuesta y la cantidad de gente. Esos van
+  sin cédula.
+- **Ver respuestas**: el admin muestra el resumen, quién se anotó solo y quién
+  fue cargado a mano.
 
 ## Modelo de datos
 
 Pestaña `guests`:
 
-| id | name | adultSlots | kidSlots | invitationSent | response | adultsConfirmed | kidsConfirmed | comment | rsvpTimestamp | contact | notes | side |
+| id | name | cedula | response | adultsConfirmed | kidsConfirmed | comment | rsvpTimestamp | contact | notes | table |
 
-Pestaña `songRecommendations` (la escribe el Apps Script):
+`cedula` va vacía en los que carga el admin a mano. `table` es el número de mesa
+como texto.
 
-| timestamp | guestId | trackId | trackName | artists | spotifyUrl |
+Pestaña `songRecommendations` (la escribe el Apps Script). Es anónima: quien
+recomienda todavía no existe como invitado, porque la fila se crea al confirmar.
+
+| timestamp | trackId | trackName | artists | spotifyUrl |
+
+Pestaña `tables`: | number | seats | zone |
+
+Pestaña `settings`: | key | value | — el contenido de la invitación, editable
+desde el admin.
+
+## Pruebas
+
+```bash
+npm test
+```
+
+Cubren la validación de cédula y —lo que más importa— la migración de esquema
+del Apps Script, que corre el `Code.gs` real contra una planilla simulada. Es lo
+único del proyecto que puede perder datos, así que conviene correrlo antes de
+tocar `apps-script/Code.gs`.

@@ -14,24 +14,25 @@ export type SongRecommendation = {
   /** Fila en la planilla. Hace falta para poder borrarla. */
   rowIndex: number;
   timestamp: string;
-  guestId: string;
   trackId: string;
   trackName: string;
   artists: string;
   spotifyUrl: string;
 };
 
-export async function searchSongs(query: string): Promise<SpotifyTrack[]> {
+export async function searchSongs(query: string, code: string): Promise<SpotifyTrack[]> {
   if (query.trim().length < 2) return [];
   const response = await getJson<{ tracks: SpotifyTrack[] }>({
     action: "searchSongs",
     query,
+    code,
   });
   return response.tracks;
 }
 
 export type SongRecommendationPayload = {
-  id: string;
+  /** Código de la invitación: la recomendación es anónima, no lleva invitado. */
+  code: string;
   trackId: string;
   trackName: string;
   artists: string;

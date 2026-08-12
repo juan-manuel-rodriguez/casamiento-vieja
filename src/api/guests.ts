@@ -1,18 +1,17 @@
-import { getJson, postJson } from "./client";
-import { applyEventOverrides } from "../lib/event";
-import type { EventOverrides } from "./settings";
+import { postJson } from "./client";
 
 export type Guest = {
   rowIndex: number;
   id: string;
   name: string;
-  /** A `value` from EVENT.sides, or "" when unassigned. */
-  side: string;
-  /** Table number as text (see VENUE_TABLES), or "" when unseated. */
+  /**
+   * Clave con la que el invitado se reconoce al confirmar. Va vacía en los que
+   * carga el admin a mano: de esa gente no hay forma de saber la cédula, y como
+   * nunca se va a auto-registrar, tampoco hace falta.
+   */
+  cedula: string;
+  /** Número de mesa como texto (ver VENUE_TABLES), o "" si no está sentado. */
   table: string;
-  adultSlots: number;
-  kidSlots: number;
-  invitationSent: boolean;
   response: "accept" | "decline" | "";
   adultsConfirmed: number;
   kidsConfirmed: number;
@@ -21,24 +20,6 @@ export type Guest = {
   contact: string;
   notes: string;
 };
-
-/** Minimal projection of a guest exposed to the public guest page. */
-export type PublicGuest = Pick<Guest, "id" | "name" | "adultSlots" | "kidSlots">;
-
-/**
- * El backend devuelve el contenido de la invitación junto con el invitado: la
- * página ya esperaba esta respuesta antes de pintar, así que traerlo acá no
- * agrega ninguna vuelta de red.
- */
-export async function fetchPublicGuest(id: string): Promise<PublicGuest | null> {
-  const response = await getJson<{
-    found: boolean;
-    guest?: PublicGuest;
-    settings?: EventOverrides;
-  }>({ action: "getGuest", id });
-  applyEventOverrides(response.settings);
-  return response.found && response.guest ? response.guest : null;
-}
 
 export async function checkAuth(auth: string): Promise<void> {
   await postJson<{ ok: true }>({ action: "checkAuth", auth });
@@ -49,19 +30,24 @@ export async function listGuests(auth: string): Promise<Guest[]> {
   return response.guests;
 }
 
+/** El link único de la invitación. Se autogenera en el backend. */
+export async function fetchInviteCode(auth: string): Promise<string> {
+  const response = await postJson<{ code: string }>({ action: "getInviteCode", auth });
+  return response.code;
+}
+
 /**
- * Input for upsertGuest. `id` is optional: when omitted the server generates
- * a random UUID. Provide `id` only when updating an existing row.
+ * Entrada de upsertGuest. `id` es opcional: sin él, el backend genera un UUID.
+ * Mandalo solo para actualizar a alguien que ya existe.
  */
 export type GuestInput = {
   id?: string;
   name: string;
-  /** A `value` from EVENT.sides, or "" when unassigned. */
-  side: string;
+  cedula: string;
   table: string;
-  adultSlots: number;
-  kidSlots: number;
-  invitationSent: boolean;
+  response: "accept" | "decline" | "";
+  adultsConfirmed: number;
+  kidsConfirmed: number;
   contact: string;
   notes: string;
 };

@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { FaSpotify, FaWhatsapp } from "react-icons/fa6";
 import { LuLink, LuPencil, LuTrash2 } from "react-icons/lu";
+import { formatCedula, isValidCedula } from "../lib/cedula";
 import {
   checkAuth,
+  deleteGuest,
+  fetchInviteCode,
   listGuests,
   upsertGuest,
-  deleteGuest,
   type Guest,
   type GuestInput,
 } from "../api/guests";
@@ -16,7 +18,7 @@ import {
 } from "../api/songs";
 import { clearPassphrase, loadPassphrase, savePassphrase } from "../auth/passphrase";
 import type { EventConfig, EventOccurrence, GiftAccount } from "../config";
-import { getEvent, useEvent, applyEventOverrides } from "../lib/event";
+import { useEvent, applyEventOverrides } from "../lib/event";
 import {
   planLayout,
   seatPositions,
@@ -34,16 +36,18 @@ type ViewState =
       guests: Guest[];
       songRecommendations: SongRecommendation[];
       venueTables: VenueTable[];
+      inviteCode: string;
     }
   | { kind: "error"; message: string };
 
-type NewGuestDraft = Omit<GuestInput, "id" | "invitationSent">;
+type NewGuestDraft = Omit<GuestInput, "id">;
 
 const EMPTY_DRAFT: NewGuestDraft = {
   name: "",
-  adultSlots: 1,
-  kidSlots: 0,
-  side: "",
+  cedula: "",
+  response: "accept",
+  adultsConfirmed: 1,
+  kidsConfirmed: 0,
   table: "",
   contact: "",
   notes: "",
@@ -51,19 +55,17 @@ const EMPTY_DRAFT: NewGuestDraft = {
 
 type Filters = {
   search: string;
-  /** "all", "unassigned", or a `value` from EVENT.sides. */
-  side: string;
   response: "all" | "pending" | "accept" | "decline";
-  sent: "all" | "sent" | "unsent";
+  /** "all", "self" (se anotó solo) o "manual" (lo cargó el admin). */
+  origin: "all" | "self" | "manual";
   /** "all", "none", or a table number as text. */
   table: string;
 };
 
 const EMPTY_FILTERS: Filters = {
   search: "",
-  side: "all",
   response: "all",
-  sent: "all",
+  origin: "all",
   table: "all",
 };
 
@@ -79,20 +81,15 @@ const TABS: Array<{ id: TabId; label: string }> = [
 function applyFilters(guests: Guest[], filters: Filters): Guest[] {
   const needle = filters.search.trim().toLowerCase();
   return guests.filter((guest) => {
-    if (needle && !`${guest.name} ${guest.id}`.toLowerCase().includes(needle)) return false;
-
-    const side = guest.side || "";
-    if (filters.side === "unassigned" && side) return false;
-    if (filters.side !== "all" && filters.side !== "unassigned" && side !== filters.side) {
-      return false;
-    }
+    if (needle && !`${guest.name} ${guest.cedula}`.toLowerCase().includes(needle)) return false;
 
     // An empty `response` is a guest who has not answered yet.
     const response = guest.response || "pending";
     if (filters.response !== "all" && response !== filters.response) return false;
 
-    if (filters.sent === "sent" && !guest.invitationSent) return false;
-    if (filters.sent === "unsent" && guest.invitationSent) return false;
+    // Quien tiene cédula se anotó solo; el resto lo cargó el admin a mano.
+    if (filters.origin === "self" && !guest.cedula) return false;
+    if (filters.origin === "manual" && guest.cedula) return false;
 
     const table = guest.table || "";
     if (filters.table === "none" && table) return false;
@@ -143,11 +140,12 @@ export function AdminPage() {
       // Las mesas y el contenido de la invitación son endpoints nuevos: si el
       // Apps Script todavía no se redeployó, no existen. En ese caso el admin
       // tiene que seguir sirviendo para lo de siempre en vez de morirse.
-      const [guests, songRecommendations, venueTables, settings] = await Promise.all([
+      const [guests, songRecommendations, venueTables, settings, inviteCode] = await Promise.all([
         listGuests(activeAuth),
         listSongRecommendations(activeAuth),
         listTables(activeAuth).catch(() => [] as VenueTable[]),
-        fetchSettings().catch(() => ({})),
+        fetchSettings(activeAuth).catch(() => ({})),
+        fetchInviteCode(activeAuth).catch(() => ""),
       ]);
       applyEventOverrides(settings);
       setView({
@@ -155,6 +153,7 @@ export function AdminPage() {
         guests,
         songRecommendations,
         venueTables,
+        inviteCode,
       });
     } catch (err) {
       const message = errorMessage(err);
@@ -215,10 +214,6 @@ export function AdminPage() {
     }
   }
 
-  async function toggleInvitationSent(guest: Guest) {
-    await saveGuestChange(guest, { invitationSent: !guest.invitationSent });
-  }
-
   async function changeTable(guest: Guest, table: string) {
     if (table === (guest.table || "")) return;
     await saveGuestChange(guest, { table });
@@ -246,9 +241,10 @@ export function AdminPage() {
     setEditingId(guest.id);
     setDraft({
       name: guest.name,
-      adultSlots: guest.adultSlots,
-      kidSlots: guest.kidSlots,
-      side: guest.side,
+      cedula: guest.cedula,
+      response: guest.response,
+      adultsConfirmed: guest.adultsConfirmed,
+      kidsConfirmed: guest.kidsConfirmed,
       table: guest.table,
       contact: guest.contact,
       notes: guest.notes,
@@ -270,19 +266,14 @@ export function AdminPage() {
     if (!auth) return;
     const name = draft.name.trim();
     if (!name) return;
-    // Al editar hay que conservar lo que el formulario no toca: si ya
-    // respondió, el backend preserva la respuesta, pero "invitación enviada"
-    // llega desde acá y mandarlo en false la desmarcaría sin querer.
-    const existing = editingId ? guests.find((g) => g.id === editingId) : undefined;
+    if (draft.cedula.trim() && !isValidCedula(draft.cedula)) {
+      setView({ kind: "error", message: "Revisá el número de cédula" });
+      return;
+    }
     setSaving(true);
     await withBusy(async () => {
       try {
-        await upsertGuest(auth, {
-          ...draft,
-          name,
-          id: editingId ?? undefined,
-          invitationSent: existing ? existing.invitationSent : false,
-        });
+        await upsertGuest(auth, { ...draft, name, id: editingId ?? undefined });
         setDraft(EMPTY_DRAFT);
         setEditingId(null);
         setFormOpen(false);
@@ -351,15 +342,14 @@ export function AdminPage() {
     );
   }
 
-  const { guests, songRecommendations, venueTables } = view;
+  const { guests, songRecommendations, venueTables, inviteCode } = view;
   // Plain calls, not useMemo: this runs after the early returns above, where
   // hooks are off limits, and filtering a wedding-sized list is free.
   const filtered = applyFilters(guests, filters);
   const hasActiveFilters =
     filters.search.trim() !== "" ||
-    filters.side !== "all" ||
     filters.response !== "all" ||
-    filters.sent !== "all" ||
+    filters.origin !== "all" ||
     filters.table !== "all";
 
   return (
@@ -368,7 +358,8 @@ export function AdminPage() {
     <main className="max-w-400 mx-auto px-4 sm:px-6 py-8 pb-24 font-sans">
       {busy && <BusyOverlay />}
       <Topbar onRefresh={() => void withBusy(() => refresh())} onSignOut={handleSignOut} />
-      <Stats guests={guests} />
+      <InviteLinkBar code={inviteCode} tagline={invitation.tagline} />
+      <Stats guests={guests} seats={totalSeats(venueTables)} />
 
       <div className="flex gap-5 sm:gap-6 border-b border-bone mb-8 overflow-x-auto">
         {TABS.map((entry) => (
@@ -410,41 +401,49 @@ export function AdminPage() {
                 required
               />
             </DraftField>
-            <DraftField label="Cupos adultos">
+            <DraftField label="Cédula (opcional)">
               <input
-                type="number"
-                min={1}
                 className="admin-input"
-                value={draft.adultSlots}
-                onChange={(e) =>
-                  setDraft({ ...draft, adultSlots: Math.max(1, Number(e.target.value)) })
-                }
+                inputMode="numeric"
+                placeholder="Solo si te la dieron"
+                value={draft.cedula}
+                onChange={(e) => setDraft({ ...draft, cedula: e.target.value })}
               />
             </DraftField>
-            <DraftField label="Cupos niños">
+            <DraftField label="Respuesta">
+              <select
+                className="admin-input"
+                value={draft.response}
+                onChange={(e) =>
+                  setDraft({ ...draft, response: e.target.value as Guest["response"] })
+                }
+              >
+                <option value="accept">Viene</option>
+                <option value="decline">No puede</option>
+                <option value="">Sin responder</option>
+              </select>
+            </DraftField>
+            <DraftField label="Adultos">
               <input
                 type="number"
                 min={0}
                 className="admin-input"
-                value={draft.kidSlots}
+                value={draft.adultsConfirmed}
                 onChange={(e) =>
-                  setDraft({ ...draft, kidSlots: Math.max(0, Number(e.target.value)) })
+                  setDraft({ ...draft, adultsConfirmed: Math.max(0, Number(e.target.value)) })
                 }
               />
             </DraftField>
-            <DraftField label="Invita">
-              <select
+            <DraftField label="Niños">
+              <input
+                type="number"
+                min={0}
                 className="admin-input"
-                value={draft.side}
-                onChange={(e) => setDraft({ ...draft, side: e.target.value })}
-              >
-                <option value="">Sin asignar</option>
-                {invitation.sides.map((side) => (
-                  <option key={side.value} value={side.value}>
-                    {side.label}
-                  </option>
-                ))}
-              </select>
+                value={draft.kidsConfirmed}
+                onChange={(e) =>
+                  setDraft({ ...draft, kidsConfirmed: Math.max(0, Number(e.target.value)) })
+                }
+              />
             </DraftField>
             <DraftField label="Mesa">
               <select
@@ -496,22 +495,9 @@ export function AdminPage() {
       <div className="flex flex-wrap gap-3 items-center mb-3">
         <input
           className="w-full sm:flex-1 sm:w-auto sm:min-w-52 px-4 py-3 border border-bone rounded bg-white focus:outline-none focus:border-gold"
-          placeholder="Buscar por nombre o id…"
+          placeholder="Buscar por nombre o cédula…"
           value={filters.search}
           onChange={(e) => setFilters({ ...filters, search: e.target.value })}
-        />
-        <FilterSelect
-          label="Invita"
-          value={filters.side}
-          onChange={(side) => setFilters({ ...filters, side })}
-          options={[
-            { value: "all", label: "Invita: todos" },
-            ...invitation.sides.map((side) => ({
-              value: side.value,
-              label: `Invita ${side.label}`,
-            })),
-            { value: "unassigned", label: "Sin asignar" },
-          ]}
         />
         <FilterSelect
           label="Respuesta"
@@ -525,13 +511,13 @@ export function AdminPage() {
           ]}
         />
         <FilterSelect
-          label="Invitación"
-          value={filters.sent}
-          onChange={(sent) => setFilters({ ...filters, sent })}
+          label="Origen"
+          value={filters.origin}
+          onChange={(origin) => setFilters({ ...filters, origin })}
           options={[
-            { value: "all", label: "Invitación: todas" },
-            { value: "sent", label: "Enviadas" },
-            { value: "unsent", label: "Sin enviar" },
+            { value: "all", label: "Origen: todos" },
+            { value: "self", label: "Se anotaron solos" },
+            { value: "manual", label: "Cargados a mano" },
           ]}
         />
         <FilterSelect
@@ -571,7 +557,6 @@ export function AdminPage() {
         venueTables={venueTables}
         onEdit={startEditing}
         onChangeTable={changeTable}
-        onToggleInvitation={toggleInvitationSent}
         onCopyLink={copyGuestLink}
         onSendWhatsApp={sendInvitationWhatsApp}
         onDelete={handleDelete}
@@ -596,7 +581,6 @@ export function AdminPage() {
       {tab === "songs" && (
         <SongRecommendationsSection
           recommendations={songRecommendations}
-          guests={guests}
           onDelete={(rowIndex) =>
             withBusy(async () => {
               await deleteSongRecommendation(auth!, rowIndex);
@@ -668,6 +652,63 @@ function PassphraseGate({
   );
 }
 
+/**
+ * El link de la invitación, que ahora es uno solo para todos. Reemplaza al
+ * "copiar link" que había por invitado, que dejó de tener sentido cuando la
+ * gente pasó a anotarse sola.
+ */
+function InviteLinkBar({ code, tagline }: { code: string; tagline: string }) {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 2000);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  if (!code) {
+    return (
+      <div className="bg-white border border-bone rounded-lg shadow-sm px-4 py-3 mb-6 text-sm text-muted">
+        No se pudo leer el código de la invitación. Si acabás de cambiar el Apps
+        Script, redeployalo y recargá.
+      </div>
+    );
+  }
+
+  const link = `${window.location.origin}${window.location.pathname.replace(/admin\/?$/, "")}?code=${code}`;
+  const message = [`¡Nos casamos! ${tagline}.`, "Acá está tu invitación:", link].join("\n");
+
+  return (
+    <div className="bg-white border border-bone rounded-lg shadow-sm px-4 py-3 mb-6 flex flex-wrap items-center gap-3">
+      <span className="text-[0.78rem] uppercase tracking-[0.16em] text-muted font-medium shrink-0">
+        Link de la invitación
+      </span>
+      <code className="flex-1 min-w-0 truncate text-sm text-ink" title={link}>
+        {link}
+      </code>
+      <button
+        type="button"
+        className="btn-ghost py-2 px-4 text-[0.8rem]"
+        onClick={() => {
+          navigator.clipboard?.writeText(link).then(() => setCopied(true), () => undefined);
+        }}
+      >
+        {copied ? "Copiado" : "Copiar"}
+      </button>
+      <a
+        className="icon-action icon-action--brand"
+        href={`https://wa.me/?text=${encodeURIComponent(message)}`}
+        target="_blank"
+        rel="noreferrer noopener"
+        title="Compartir por WhatsApp"
+        aria-label="Compartir la invitación por WhatsApp"
+      >
+        <FaWhatsapp size={17} aria-hidden="true" />
+      </a>
+    </div>
+  );
+}
+
 function Topbar({ onRefresh, onSignOut }: { onRefresh: () => void; onSignOut: () => void }) {
   return (
     <header className="flex flex-wrap items-center justify-between gap-3 pb-6 border-b border-bone mb-8">
@@ -684,50 +725,40 @@ function Topbar({ onRefresh, onSignOut }: { onRefresh: () => void; onSignOut: ()
   );
 }
 
-function Stats({ guests }: { guests: Guest[] }) {
+function Stats({ guests, seats }: { guests: Guest[]; seats: number }) {
   const stats = useMemo(() => {
-    const total = guests.length;
     const accepted = guests.filter((g) => g.response === "accept");
     const declined = guests.filter((g) => g.response === "decline");
-    const pending = total - accepted.length - declined.length;
-    const invitationsSent = guests.filter((g) => g.invitationSent).length;
     let adultsConfirmed = 0;
     let kidsConfirmed = 0;
     for (const g of accepted) {
       adultsConfirmed += g.adultsConfirmed;
       kidsConfirmed += g.kidsConfirmed;
     }
-    const adultSlotsTotal = guests.reduce((acc, g) => acc + g.adultSlots, 0);
-    const kidSlotsTotal = guests.reduce((acc, g) => acc + g.kidSlots, 0);
     return {
-      total,
+      total: guests.length,
       accepted,
       declined,
-      pending,
-      invitationsSent,
+      pending: guests.length - accepted.length - declined.length,
+      // Quien tiene cédula se anotó solo desde la invitación.
+      selfRegistered: guests.filter((g) => g.cedula).length,
       adultsConfirmed,
       kidsConfirmed,
-      adultSlotsTotal,
-      kidSlotsTotal,
     };
   }, [guests]);
 
   return (
     <section className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 mb-10">
-      <StatCard label="Invitaciones" value={stats.total} />
-      <StatCard label="Enviadas" value={stats.invitationsSent} total={stats.total} />
-      <StatCard label="Aceptaron" value={stats.accepted.length} />
+      <StatCard label="Invitados" value={stats.total} />
+      <StatCard label="Se anotaron solos" value={stats.selfRegistered} total={stats.total} />
+      <StatCard label="Vienen" value={stats.accepted.length} />
       <StatCard label="No pueden" value={stats.declined.length} />
+      <StatCard label="Adultos" value={stats.adultsConfirmed} accent />
+      {/* Contra los lugares del salón: es el número con el que importa comparar. */}
       <StatCard
-        label="Adultos"
-        value={stats.adultsConfirmed}
-        total={stats.adultSlotsTotal}
-        accent
-      />
-      <StatCard
-        label="Niños"
-        value={stats.kidsConfirmed}
-        total={stats.kidSlotsTotal}
+        label="Personas"
+        value={stats.adultsConfirmed + stats.kidsConfirmed}
+        total={seats}
         accent
       />
     </section>
@@ -822,7 +853,6 @@ type TableProps = {
   venueTables: readonly VenueTable[];
   onEdit: (guest: Guest) => void;
   onChangeTable: (guest: Guest, table: string) => void;
-  onToggleInvitation: (guest: Guest) => void;
   onCopyLink: (id: string) => void;
   onSendWhatsApp: (guest: Guest) => void;
   onDelete: (guest: Guest) => void;
@@ -857,18 +887,6 @@ function TablePicker({
   );
 }
 
-function SentCheckbox({ guest, onToggle }: { guest: Guest; onToggle: (guest: Guest) => void }) {
-  return (
-    <input
-      type="checkbox"
-      className="admin-checkbox"
-      checked={guest.invitationSent}
-      onChange={() => onToggle(guest)}
-      aria-label={`Invitación enviada a ${guest.name}`}
-      title={guest.invitationSent ? "Invitación enviada" : "Invitación sin enviar"}
-    />
-  );
-}
 
 function GuestActions({
   guest,
@@ -921,19 +939,6 @@ function GuestActions({
   );
 }
 
-function GuestSlots({ guest }: { guest: Guest }) {
-  return (
-    <>
-      <SlotsCell adults={guest.adultSlots} kids={guest.kidSlots} />
-      {guest.response === "accept" && (
-        <div className="text-[0.78rem] text-success tabular-nums">
-          vienen {guest.adultsConfirmed}A
-          {guest.kidsConfirmed > 0 && ` · ${guest.kidsConfirmed}N`}
-        </div>
-      )}
-    </>
-  );
-}
 
 function GuestTable({
   guests,
@@ -941,7 +946,6 @@ function GuestTable({
   venueTables,
   onEdit,
   onChangeTable,
-  onToggleInvitation,
   onCopyLink,
   onSendWhatsApp,
   onDelete,
@@ -967,24 +971,18 @@ function GuestTable({
               <div className="min-w-0">
                 <div className="font-medium text-ink">{guest.name}</div>
                 <div className="text-[0.78rem] text-subtle">
-                  {guestSideLabel(guest.side)}
-                  <span className="mx-1.5 text-bone">|</span>
-                  <span className="font-mono" title={guest.id}>
-                    {guest.id.slice(0, 8)}
-                  </span>
+                  {guest.cedula ? (
+                    formatCedula(guest.cedula)
+                  ) : (
+                    <span className="italic">Cargado a mano</span>
+                  )}
                 </div>
               </div>
               <ResponsePill response={guest.response} />
             </header>
 
             <div className="flex flex-wrap items-center gap-x-5 gap-y-3 text-sm">
-              <div>
-                <GuestSlots guest={guest} />
-              </div>
-              <label className="flex items-center gap-2 text-muted cursor-pointer">
-                <SentCheckbox guest={guest} onToggle={onToggleInvitation} />
-                Enviada
-              </label>
+              <PeopleCell guest={guest} />
               <TablePicker guest={guest} venueTables={venueTables} onChange={onChangeTable} className="w-36" />
             </div>
 
@@ -1027,32 +1025,24 @@ function GuestTable({
               <tr key={guest.id} className="border-t border-bone hover:bg-soft/30 transition-colors">
                 <Td>
                   <div className="font-medium text-ink">{guest.name}</div>
-                  {/* Side and id ride along under the name: both are worth a
-                      glance, neither deserves a column of its own. The full
-                      uuid is on hover — spelled out it wrapped over four lines
-                      and stretched every row. */}
+                  {/* La cédula va bajo el nombre: distingue de un vistazo a
+                      quien se anotó solo de quien cargó el admin a mano. */}
                   <div className="text-[0.78rem] text-subtle">
-                    {guestSideLabel(guest.side)}
-                    <span className="mx-1.5 text-bone">|</span>
-                    <span className="font-mono" title={guest.id}>
-                      {guest.id.slice(0, 8)}
-                    </span>
+                    {guest.cedula ? (
+                      formatCedula(guest.cedula)
+                    ) : (
+                      <span className="italic">Cargado a mano</span>
+                    )}
                   </div>
                 </Td>
                 <Td>
                   <TablePicker guest={guest} venueTables={venueTables} onChange={onChangeTable} className="w-36" />
                 </Td>
-                {/* Invited vs confirmed in one column: the second number only
-                    means anything next to the first one. */}
                 <Td>
-                  <GuestSlots guest={guest} />
+                  <PeopleCell guest={guest} />
                 </Td>
-                {/* Sent + answered is a single workflow state, so one column. */}
                 <Td>
-                  <div className="flex items-center gap-2.5">
-                    <SentCheckbox guest={guest} onToggle={onToggleInvitation} />
-                    <ResponsePill response={guest.response} />
-                  </div>
+                  <ResponsePill response={guest.response} />
                 </Td>
                 <Td wrap>{guest.comment ?? ""}</Td>
                 <Td>
@@ -1076,8 +1066,13 @@ function GuestTable({
 }
 
 
-function guestSideLabel(side: Guest["side"]) {
-  return getEvent().sides.find((s) => s.value === side)?.label ?? "Sin asignar";
+
+/** Cuánta gente trae. Es el número que cuenta para las mesas y para el salón. */
+function PeopleCell({ guest }: { guest: Guest }) {
+  if (guest.response === "decline") {
+    return <span className="text-sm text-subtle italic">No viene</span>;
+  }
+  return <PeopleCellInner adults={guest.adultsConfirmed} kids={guest.kidsConfirmed} />;
 }
 
 function Th({ children, ...rest }: React.ThHTMLAttributes<HTMLTableCellElement>) {
@@ -1134,10 +1129,7 @@ function buildOccupancy(
 
   for (const guest of guests) {
     if (guest.response === "decline") continue;
-    const people =
-      guest.response === "accept"
-        ? guest.adultsConfirmed + guest.kidsConfirmed
-        : guest.adultSlots + guest.kidSlots;
+    const people = guestHeadcount(guest);
     const seat = byTable.get(Number(guest.table));
     if (!guest.table || !seat) {
       unseated.push(guest);
@@ -1257,11 +1249,12 @@ function TablesTab({
   );
 }
 
-/** People a guest brings: what they confirmed, or their full slots if silent. */
+/**
+ * Cuánta gente ocupa. Ya no hay cupos a los que caer: lo que trae es lo que el
+ * invitado declaró al confirmar, o lo que el admin le anotó al cargarlo.
+ */
 function guestHeadcount(guest: Guest): number {
-  return guest.response === "accept"
-    ? guest.adultsConfirmed + guest.kidsConfirmed
-    : guest.adultSlots + guest.kidSlots;
+  return guest.response === "decline" ? 0 : guest.adultsConfirmed + guest.kidsConfirmed;
 }
 
 /**
@@ -1488,19 +1481,11 @@ function GuestChip({
 
 function SongRecommendationsSection({
   recommendations,
-  guests,
   onDelete,
 }: {
   recommendations: SongRecommendation[];
-  guests: Guest[];
   onDelete: (rowIndex: number) => Promise<void>;
 }) {
-  const guestNameById = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const g of guests) map.set(g.id, g.name);
-    return map;
-  }, [guests]);
-
   const sorted = useMemo(() => {
     return [...recommendations].sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
   }, [recommendations]);
@@ -1515,7 +1500,6 @@ function SongRecommendationsSection({
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="bg-cream">
-              <Th>Invitado</Th>
               <Th>Canción</Th>
               <Th>Artistas</Th>
               <Th aria-label="Acciones"></Th>
@@ -1524,7 +1508,7 @@ function SongRecommendationsSection({
           <tbody>
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={4} className="text-center text-subtle italic py-10 px-4">
+                <td colSpan={3} className="text-center text-subtle italic py-10 px-4">
                   Todavía no hay recomendaciones.
                 </td>
               </tr>
@@ -1534,11 +1518,6 @@ function SongRecommendationsSection({
                 key={`${rec.timestamp}-${rec.trackId}-${idx}`}
                 className="border-t border-bone hover:bg-soft/30 transition-colors"
               >
-                <Td>
-                  {guestNameById.get(rec.guestId) ?? (
-                    <span className="text-subtle italic">Invitado borrado</span>
-                  )}
-                </Td>
                 <Td>
                   <span className="font-medium text-ink">{rec.trackName}</span>
                 </Td>
@@ -1601,7 +1580,7 @@ function Spinner() {
   );
 }
 
-function SlotsCell({ adults, kids }: { adults: number; kids: number }) {
+function PeopleCellInner({ adults, kids }: { adults: number; kids: number }) {
   return (
     <div className="flex gap-2 items-baseline tabular-nums text-ink">
       <span className="font-medium">{adults}A</span>

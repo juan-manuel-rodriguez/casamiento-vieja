@@ -1,38 +1,38 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { fetchPublicGuest, type PublicGuest } from "../api/guests";
 import { submitRsvp, type RsvpResponse } from "../api/rsvp";
+import { fetchSettings } from "../api/settings";
+import { isValidCedula } from "../lib/cedula";
 import {
   searchSongs,
   submitSongRecommendation,
   type SpotifyTrack,
 } from "../api/songs";
 import { type EventOccurrence } from "../config";
-import { getEvent, useEvent } from "../lib/event";
+import { applyEventOverrides, getEvent, useEvent } from "../lib/event";
 import { LaurelBranch } from "../components/LaurelBranch";
 import { shouldRestartClip, type PlaybackState } from "../lib/playback";
 
 type ViewState =
   | { kind: "loading" }
-  | { kind: "not-found" }
-  | { kind: "ready"; guest: PublicGuest }
-  | { kind: "sent"; response: RsvpResponse }
+  /** Sin código, o con uno que el backend no reconoce. */
+  | { kind: "invalid-code" }
+  | { kind: "ready" }
+  | { kind: "sent"; response: RsvpResponse; created: boolean }
   | { kind: "error"; message: string };
 
 export function GuestPage() {
   const [searchParams] = useSearchParams();
   const invitation = useEvent();
-  const id = searchParams.get("id") ?? "";
+  const code = searchParams.get("code") ?? "";
   const isDemo = searchParams.has("demo");
 
+  // Sin código no se hace ni un viaje de red: el backend lo rechazaría igual.
   const initialView: ViewState = isDemo
-    ? {
-        kind: "ready",
-        guest: { id: "demo", name: "María Sol", adultSlots: 2, kidSlots: 1 },
-      }
-    : id
+    ? { kind: "ready" }
+    : code
       ? { kind: "loading" }
-      : { kind: "not-found" };
+      : { kind: "invalid-code" };
 
   const trackId = useMemo(
     () => {
@@ -49,12 +49,11 @@ export function GuestPage() {
   const [view, setView] = useState<ViewState>(initialView);
   const [entered, setEntered] = useState(isDemo || !hasAudio);
   const playerRef = useRef<{ play: () => void } | null>(null);
-  const [adultsConfirmed, setAdultsConfirmed] = useState(
-    initialView.kind === "ready" ? initialView.guest.adultSlots : 1,
-  );
-  const [kidsConfirmed, setKidsConfirmed] = useState(
-    initialView.kind === "ready" ? initialView.guest.kidSlots : 0,
-  );
+  const [name, setName] = useState("");
+  const [cedula, setCedula] = useState("");
+  const [cedulaError, setCedulaError] = useState<string | null>(null);
+  const [adultsConfirmed, setAdultsConfirmed] = useState(1);
+  const [kidsConfirmed, setKidsConfirmed] = useState(0);
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -79,30 +78,47 @@ export function GuestPage() {
   }, [trackId, ownAudio]);
 
   useEffect(() => {
-    if (!id || isDemo) return;
-    fetchPublicGuest(id)
-      .then((guest) => {
-        if (!guest) return setView({ kind: "not-found" });
-        setAdultsConfirmed(guest.adultSlots);
-        setKidsConfirmed(guest.kidSlots);
-        setView({ kind: "ready", guest });
+    if (!code || isDemo) return;
+    fetchSettings(code)
+      .then((settings) => {
+        applyEventOverrides(settings);
+        setView({ kind: "ready" });
       })
-      .catch((err: unknown) => setView({ kind: "error", message: errorMessage(err) }));
-  }, [id, isDemo]);
+      .catch((err: unknown) => {
+        const message = errorMessage(err);
+        // El backend contesta así cuando el código no es el suyo.
+        if (message.toLowerCase().includes("invitación inválido")) {
+          return setView({ kind: "invalid-code" });
+        }
+        setView({ kind: "error", message });
+      });
+  }, [code, isDemo]);
 
   async function respond(response: RsvpResponse) {
     if (view.kind !== "ready" || submitting) return;
-    setSubmitting(true);
+    if (!name.trim()) return setSubmitError("Escribí tu nombre y apellido");
+    if (!isValidCedula(cedula)) {
+      setCedulaError("Revisá el número de cédula");
+      return;
+    }
+    setCedulaError(null);
     setSubmitError(null);
+
+    // En demo no hay backend ni código: se muestra el flujo y nada más.
+    if (isDemo) return setView({ kind: "sent", response, created: true });
+
+    setSubmitting(true);
     try {
-      await submitRsvp({
-        id: view.guest.id,
+      const { created } = await submitRsvp({
+        code,
+        name: name.trim(),
+        cedula,
         response,
         adultsConfirmed: response === "accept" ? adultsConfirmed : 0,
         kidsConfirmed: response === "accept" ? kidsConfirmed : 0,
         comment: comment.trim(),
       });
-      setView({ kind: "sent", response });
+      setView({ kind: "sent", response, created });
     } catch (err: unknown) {
       setSubmitError(errorMessage(err));
     } finally {
@@ -123,9 +139,9 @@ export function GuestPage() {
             </button>
           </StatusBlock>
         )}
-        {view.kind === "not-found" && (
-          <StatusBlock eyebrow="Hmm" title="No encontramos tu invitación">
-            <p>Revisá el link que te mandamos o contactanos para que te enviemos uno nuevo.</p>
+        {view.kind === "invalid-code" && (
+          <StatusBlock eyebrow="Hmm" title="Este link no es válido">
+            <p>Pedinos de nuevo el link de la invitación y abrilo completo, sin recortarlo.</p>
           </StatusBlock>
         )}
         {/* The SpotifyPlayer is only rendered while we have a real guest to
@@ -142,7 +158,11 @@ export function GuestPage() {
           <>
             <EventDetails />
             <RsvpForm
-              guest={view.guest}
+              name={name}
+              setName={setName}
+              cedula={cedula}
+              setCedula={setCedula}
+              cedulaError={cedulaError}
               adultsConfirmed={adultsConfirmed}
               setAdultsConfirmed={setAdultsConfirmed}
               kidsConfirmed={kidsConfirmed}
@@ -153,14 +173,14 @@ export function GuestPage() {
               submitError={submitError}
               onRespond={respond}
             />
-            <SongRecommendation guestId={view.guest.id} />
+            <SongRecommendation code={isDemo ? null : code} />
             <GiftAccountSection />
           </>
         )}
         {view.kind === "sent" && (
           <>
-            <ThankYouState response={view.response} />
-            <SongRecommendation guestId={isDemo ? "demo" : id} />
+            <ThankYouState response={view.response} created={view.created} />
+            <SongRecommendation code={isDemo ? null : code} />
           </>
         )}
       </main>
@@ -526,7 +546,11 @@ function HangerIcon({ className }: { className?: string }) {
 }
 
 type RsvpFormProps = {
-  guest: PublicGuest;
+  name: string;
+  setName: (value: string) => void;
+  cedula: string;
+  setCedula: (value: string) => void;
+  cedulaError: string | null;
   adultsConfirmed: number;
   setAdultsConfirmed: (value: number) => void;
   kidsConfirmed: number;
@@ -539,7 +563,11 @@ type RsvpFormProps = {
 };
 
 function RsvpForm({
-  guest,
+  name,
+  setName,
+  cedula,
+  setCedula,
+  cedulaError,
   adultsConfirmed,
   setAdultsConfirmed,
   kidsConfirmed,
@@ -550,11 +578,6 @@ function RsvpForm({
   submitError,
   onRespond,
 }: RsvpFormProps) {
-  const { adultSlots, kidSlots } = guest;
-  const adultSummary =
-    adultSlots === 1 ? "1 adulto" : `${adultSlots} adultos`;
-  const kidSummary =
-    kidSlots === 0 ? "" : kidSlots === 1 ? " y 1 niño" : ` y ${kidSlots} niños`;
   return (
     <Section id="rsvp">
       <Eyebrow>Tu respuesta</Eyebrow>
@@ -563,33 +586,65 @@ function RsvpForm({
           Confirmá tu asistencia
         </h2>
         <p className="text-muted text-center mb-8">
-          Tu invitación incluye hasta {adultSummary}
-          {kidSummary}.
+          Si ya confirmaste y querés cambiar algo, completá de nuevo con la misma
+          cédula y se actualiza.
         </p>
         {submitError && <ErrorBanner message={submitError} />}
 
-        {adultSlots > 1 && (
-          <CountStepper
-            id="adults"
-            label="Adultos"
-            value={adultsConfirmed}
-            min={1}
-            max={adultSlots}
+        <div className="mb-6">
+          <FieldLabel htmlFor="name">Nombre y apellido</FieldLabel>
+          <input
+            id="name"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="Ana Pérez"
+            autoComplete="name"
             disabled={submitting}
-            onChange={setAdultsConfirmed}
+            className="w-full px-4 py-3 bg-ivory border border-bone rounded focus:outline-none focus:border-gold focus:bg-white transition-colors"
           />
-        )}
-        {kidSlots > 0 && (
-          <CountStepper
-            id="kids"
-            label="Niños"
-            value={kidsConfirmed}
-            min={0}
-            max={kidSlots}
+        </div>
+
+        <div className="mb-6">
+          <FieldLabel htmlFor="cedula">Cédula</FieldLabel>
+          <input
+            id="cedula"
+            value={cedula}
+            onChange={(event) => setCedula(event.target.value)}
+            placeholder="1.234.567-8"
+            inputMode="numeric"
+            autoComplete="off"
             disabled={submitting}
-            onChange={setKidsConfirmed}
+            aria-invalid={Boolean(cedulaError)}
+            aria-describedby={cedulaError ? "cedula-error" : undefined}
+            className={`w-full px-4 py-3 bg-ivory border rounded focus:outline-none focus:bg-white transition-colors ${
+              cedulaError ? "border-danger" : "border-bone focus:border-gold"
+            }`}
           />
-        )}
+          {/* Es lo que nos permite reconocerte si volvés a completar el
+              formulario, en vez de anotarte dos veces. */}
+          <p id="cedula-error" className="text-sm mt-1.5 mb-0 text-muted">
+            {cedulaError ? <span className="text-danger">{cedulaError}</span> : "Para reconocerte si después querés cambiar algo."}
+          </p>
+        </div>
+
+        <CountStepper
+          id="adults"
+          label="Adultos"
+          value={adultsConfirmed}
+          min={1}
+          max={10}
+          disabled={submitting}
+          onChange={setAdultsConfirmed}
+        />
+        <CountStepper
+          id="kids"
+          label="Niños"
+          value={kidsConfirmed}
+          min={0}
+          max={10}
+          disabled={submitting}
+          onChange={setKidsConfirmed}
+        />
 
         <div className="mb-8">
           <FieldLabel htmlFor="comment">Comentario (opcional)</FieldLabel>
@@ -707,7 +762,6 @@ function CountStepper({
         >
           +
         </StepperButton>
-        <span className="text-sm text-subtle">de {max}</span>
       </div>
     </div>
   );
@@ -763,17 +817,25 @@ function StatusBlock({
   );
 }
 
-function ThankYouState({ response }: { response: RsvpResponse }) {
+function ThankYouState({ response, created }: { response: RsvpResponse; created: boolean }) {
+  // Volver a completar el formulario con la misma cédula actualiza en vez de
+  // duplicar, así que conviene decirlo: si no, parece que no pasó nada.
+  const howToChange =
+    "Si necesitás cambiar algo, completá el formulario de nuevo con la misma cédula.";
   if (response === "accept") {
     return (
       <StatusBlock eyebrow="Gracias" title="¡Nos vemos pronto!">
-        <p>Recibimos tu confirmación. Si necesitás cambiar algo, abrí de nuevo el link.</p>
+        <p>
+          {created ? "Recibimos tu confirmación." : "Actualizamos tu confirmación."} {howToChange}
+        </p>
       </StatusBlock>
     );
   }
   return (
     <StatusBlock eyebrow="Gracias por avisarnos" title="Te vamos a extrañar">
-      <p>Recibimos tu respuesta. Si algo cambia, abrí de nuevo el link y avisanos.</p>
+      <p>
+        {created ? "Recibimos tu respuesta." : "Actualizamos tu respuesta."} {howToChange}
+      </p>
     </StatusBlock>
   );
 }
@@ -1221,7 +1283,12 @@ function SpotifyPlayer({
   );
 }
 
-function SongRecommendation({ guestId }: { guestId: string }) {
+/**
+ * La recomendación es anónima: quien la manda todavía no existe como invitado,
+ * porque la fila se crea recién al confirmar. `code` en null es el modo demo,
+ * donde no hay backend contra el cual buscar.
+ */
+function SongRecommendation({ code }: { code: string | null }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SpotifyTrack[]>([]);
   const [searching, setSearching] = useState(false);
@@ -1243,7 +1310,7 @@ function SongRecommendation({ guestId }: { guestId: string }) {
       }
       setSearching(true);
       try {
-        const tracks = await searchSongs(q);
+        const tracks = await searchSongs(q, code ?? "");
         if (cancelled) return;
         setResults(tracks);
         setSearchError(null);
@@ -1259,14 +1326,14 @@ function SongRecommendation({ guestId }: { guestId: string }) {
       cancelled = true;
       window.clearTimeout(handle);
     };
-  }, [query]);
+  }, [query, code]);
 
   async function sendRecommendation() {
     if (!selected) return;
     setSubmitting(true);
     try {
       await submitSongRecommendation({
-        id: guestId,
+        code: code ?? "",
         trackId: selected.id,
         trackName: selected.name,
         artists: selected.artists,
