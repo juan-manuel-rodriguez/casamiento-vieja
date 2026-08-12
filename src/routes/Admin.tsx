@@ -294,34 +294,7 @@ export function AdminPage() {
   }
 
 
-  function buildInviteLink(code: string): string {
-    const { origin, pathname } = window.location;
-    return `${origin}${pathname.replace(/admin\/?$/, "")}?code=${code}`;
-  }
 
-  /** Manda el link único de la invitación al teléfono de ese invitado. */
-  function sendInvitationWhatsApp(guest: Guest) {
-    if (!guest.phone) {
-      alert("Este invitado no tiene teléfono cargado.");
-      return;
-    }
-    const code = view.kind === "ready" ? view.inviteCode : "";
-    if (!code) {
-      alert("Todavía no se pudo leer el código de la invitación.");
-      return;
-    }
-    const inviteLink = buildInviteLink(code);
-    // Sin el nombre del invitado: la invitación tampoco lo nombra. El texto
-    // sale de la frase de la invitación, así se edita desde el admin y no
-    // queda otra copia suelta en el código.
-    const message = [
-      `¡Nos casamos! ${invitation.tagline}.`,
-      "Acá está tu invitación:",
-      inviteLink,
-    ].join("\n");
-    const waUrl = `https://wa.me/${guest.phone}?text=${encodeURIComponent(message)}`;
-    window.open(waUrl, "_blank", "noopener,noreferrer");
-  }
 
   if (view.kind === "needs-passphrase") {
     return <PassphraseGate error={view.error} onSubmit={handleSubmitPassphrase} />;
@@ -564,7 +537,6 @@ export function AdminPage() {
         venueTables={venueTables}
         onEdit={startEditing}
         onChangeTable={changeTable}
-        onSendWhatsApp={sendInvitationWhatsApp}
         onDelete={handleDelete}
       />
         </>
@@ -859,7 +831,6 @@ type TableProps = {
   venueTables: readonly VenueTable[];
   onEdit: (guest: Guest) => void;
   onChangeTable: (guest: Guest, table: string) => void;
-  onSendWhatsApp: (guest: Guest) => void;
   onDelete: (guest: Guest) => void;
 };
 
@@ -896,12 +867,10 @@ function TablePicker({
 function GuestActions({
   guest,
   onEdit,
-  onSendWhatsApp,
   onDelete,
 }: {
   guest: Guest;
   onEdit: (guest: Guest) => void;
-  onSendWhatsApp: (guest: Guest) => void;
   onDelete: (guest: Guest) => void;
 }) {
   return (
@@ -913,14 +882,6 @@ function GuestActions({
         aria-label={`Editar los datos de ${guest.name}`}
       >
         <LuPencil size={16} aria-hidden="true" />
-      </button>
-      <button
-        className="icon-action icon-action--brand"
-        onClick={() => onSendWhatsApp(guest)}
-        title="Enviar por WhatsApp"
-        aria-label={`Enviar invitación por WhatsApp a ${guest.name}`}
-      >
-        <FaWhatsapp size={17} aria-hidden="true" />
       </button>
       <button
         className="icon-action icon-action--danger"
@@ -941,7 +902,6 @@ function GuestTable({
   venueTables,
   onEdit,
   onChangeTable,
-  onSendWhatsApp,
   onDelete,
 }: TableProps) {
   const emptyMessage =
@@ -982,7 +942,6 @@ function GuestTable({
               <GuestActions
                 guest={guest}
                 onEdit={onEdit}
-                        onSendWhatsApp={onSendWhatsApp}
                 onDelete={onDelete}
               />
             </footer>
@@ -1035,8 +994,7 @@ function GuestTable({
                     <GuestActions
                       guest={guest}
                       onEdit={onEdit}
-                                    onSendWhatsApp={onSendWhatsApp}
-                      onDelete={onDelete}
+                                  onDelete={onDelete}
                     />
                   </div>
                 </Td>
@@ -1817,34 +1775,6 @@ function InvitationTab({
           value={draft.date}
           onChange={(v) => set("date", v)}
         />
-        <InvitationField
-          label="Foto"
-          hint="Ruta dentro del sitio, por ejemplo /sebayemi.jpeg, o una URL completa."
-          value={draft.photoUrl}
-          onChange={(v) => set("photoUrl", v)}
-        />
-        <InvitationField
-          label="Audio propio"
-          hint="Ruta del mp3 en el sitio, ej. /cancion.mp3. Si lo cargás, suena el tema entero desde el principio y se ignora Spotify."
-          value={draft.audioUrl}
-          onChange={(v) => set("audioUrl", v)}
-        />
-        <InvitationField
-          label="Título de la canción"
-          value={draft.audioTitle}
-          onChange={(v) => set("audioTitle", v)}
-        />
-        <InvitationField
-          label="Artista"
-          value={draft.audioArtist}
-          onChange={(v) => set("audioArtist", v)}
-        />
-        <InvitationField
-          label="Tema de Spotify"
-          hint="Vacío quita la portada con el botón Ver invitación."
-          value={draft.spotifyTrackUrl}
-          onChange={(v) => set("spotifyTrackUrl", v)}
-        />
       </div>
 
       {draft.events.map((occurrence, index) => (
@@ -1899,43 +1829,9 @@ function InvitationTab({
             value={occurrence.note ?? ""}
             onChange={(v) => setEvent(index, { note: v })}
           />
-          <label className="flex flex-wrap items-center gap-4 text-sm text-muted">
-            <span className="flex items-center gap-2">
-              Ícono
-              <select
-                className="admin-input"
-                value={occurrence.icon}
-                onChange={(e) => setEvent(index, { icon: e.target.value as "rings" | "party" })}
-              >
-                <option value="rings">Alianzas</option>
-                <option value="party">Copas</option>
-              </select>
-            </span>
-            <span className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                className="admin-checkbox"
-                checked={Boolean(occurrence.showDressCode)}
-                onChange={(e) => setEvent(index, { showDressCode: e.target.checked })}
-              />
-              Mostrar la vestimenta acá
-            </span>
-          </label>
         </div>
       ))}
 
-      <button
-        type="button"
-        className="btn-ghost mb-6"
-        onClick={() =>
-          set("events", [
-            ...draft.events,
-            { label: "", date: "", time: "", venue: "", address: "", mapUrl: "", icon: "party" },
-          ])
-        }
-      >
-        Agregar evento
-      </button>
 
       <div className="bg-white border border-bone rounded-lg shadow-sm p-5 mb-5 grid gap-4">
         <h3 className="text-[0.78rem] uppercase tracking-[0.22em] text-muted font-medium m-0">
@@ -2023,18 +1919,6 @@ function InvitationTab({
             </div>
           </div>
         ))}
-        <button
-          type="button"
-          className="btn-ghost justify-self-start"
-          onClick={() =>
-            set("giftAccounts", [
-              ...draft.giftAccounts,
-              { bank: "", label: "", value: "", holder: "" },
-            ])
-          }
-        >
-          Agregar cuenta
-        </button>
         <InvitationField
           label="Confirmar antes del"
           value={draft.rsvpDeadline}
