@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { FaSpotify, FaWhatsapp } from "react-icons/fa6";
-import { LuLink, LuPencil, LuTrash2 } from "react-icons/lu";
-import { formatCedula, isValidCedula } from "../lib/cedula";
+import { LuPencil, LuTrash2 } from "react-icons/lu";
+import { isValidPhone, normalizePhone } from "../lib/phone";
 import {
   checkAuth,
   deleteGuest,
@@ -44,12 +44,11 @@ type NewGuestDraft = Omit<GuestInput, "id">;
 
 const EMPTY_DRAFT: NewGuestDraft = {
   name: "",
-  cedula: "",
+  phone: "",
   response: "accept",
   adultsConfirmed: 1,
   kidsConfirmed: 0,
   table: "",
-  contact: "",
   notes: "",
 };
 
@@ -81,15 +80,15 @@ const TABS: Array<{ id: TabId; label: string }> = [
 function applyFilters(guests: Guest[], filters: Filters): Guest[] {
   const needle = filters.search.trim().toLowerCase();
   return guests.filter((guest) => {
-    if (needle && !`${guest.name} ${guest.cedula}`.toLowerCase().includes(needle)) return false;
+    if (needle && !`${guest.name} ${guest.phone}`.toLowerCase().includes(needle)) return false;
 
     // An empty `response` is a guest who has not answered yet.
     const response = guest.response || "pending";
     if (filters.response !== "all" && response !== filters.response) return false;
 
-    // Quien tiene cédula se anotó solo; el resto lo cargó el admin a mano.
-    if (filters.origin === "self" && !guest.cedula) return false;
-    if (filters.origin === "manual" && guest.cedula) return false;
+    // Quien tiene fecha de respuesta se anotó solo desde la invitación.
+    if (filters.origin === "self" && !guest.rsvpTimestamp) return false;
+    if (filters.origin === "manual" && guest.rsvpTimestamp) return false;
 
     const table = guest.table || "";
     if (filters.table === "none" && table) return false;
@@ -241,12 +240,11 @@ export function AdminPage() {
     setEditingId(guest.id);
     setDraft({
       name: guest.name,
-      cedula: guest.cedula,
+      phone: guest.phone,
       response: guest.response,
       adultsConfirmed: guest.adultsConfirmed,
       kidsConfirmed: guest.kidsConfirmed,
       table: guest.table,
-      contact: guest.contact,
       notes: guest.notes,
     });
     setFormOpen(true);
@@ -266,14 +264,19 @@ export function AdminPage() {
     if (!auth) return;
     const name = draft.name.trim();
     if (!name) return;
-    if (draft.cedula.trim() && !isValidCedula(draft.cedula)) {
-      setView({ kind: "error", message: "Revisá el número de cédula" });
+    if (!isValidPhone(draft.phone)) {
+      setView({ kind: "error", message: "Escribí un teléfono válido, solo números" });
       return;
     }
     setSaving(true);
     await withBusy(async () => {
       try {
-        await upsertGuest(auth, { ...draft, name, id: editingId ?? undefined });
+        await upsertGuest(auth, {
+          ...draft,
+          name,
+          phone: normalizePhone(draft.phone),
+          id: editingId ?? undefined,
+        });
         setDraft(EMPTY_DRAFT);
         setEditingId(null);
         setFormOpen(false);
@@ -286,26 +289,24 @@ export function AdminPage() {
     });
   }
 
-  function copyGuestLink(id: string) {
-    void navigator.clipboard.writeText(buildGuestLink(id));
+
+  function buildInviteLink(code: string): string {
+    const { origin, pathname } = window.location;
+    return `${origin}${pathname.replace(/admin\/?$/, "")}?code=${code}`;
   }
 
-  function buildGuestLink(id: string): string {
-    const base = window.location.origin + window.location.pathname.replace(/admin\/?$/, "");
-    return `${base}?id=${id}`;
-  }
-
-  function normalizePhoneForWa(contact: string): string {
-    return contact.replace(/\D/g, "");
-  }
-
+  /** Manda el link único de la invitación al teléfono de ese invitado. */
   function sendInvitationWhatsApp(guest: Guest) {
-    const phone = normalizePhoneForWa(guest.contact ?? "");
-    if (!phone) {
-      alert("Este invitado no tiene un contacto válido para WhatsApp.");
+    if (!guest.phone) {
+      alert("Este invitado no tiene teléfono cargado.");
       return;
     }
-    const inviteLink = buildGuestLink(guest.id);
+    const code = view.kind === "ready" ? view.inviteCode : "";
+    if (!code) {
+      alert("Todavía no se pudo leer el código de la invitación.");
+      return;
+    }
+    const inviteLink = buildInviteLink(code);
     // Sin el nombre del invitado: la invitación tampoco lo nombra. El texto
     // sale de la frase de la invitación, así se edita desde el admin y no
     // queda otra copia suelta en el código.
@@ -314,7 +315,7 @@ export function AdminPage() {
       "Acá está tu invitación:",
       inviteLink,
     ].join("\n");
-    const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+    const waUrl = `https://wa.me/${guest.phone}?text=${encodeURIComponent(message)}`;
     window.open(waUrl, "_blank", "noopener,noreferrer");
   }
 
@@ -401,13 +402,18 @@ export function AdminPage() {
                 required
               />
             </DraftField>
-            <DraftField label="Cédula (opcional)">
+            <DraftField label="Teléfono" required>
               <input
                 className="admin-input"
                 inputMode="numeric"
-                placeholder="Solo si te la dieron"
-                value={draft.cedula}
-                onChange={(e) => setDraft({ ...draft, cedula: e.target.value })}
+                placeholder="099123456"
+                value={draft.phone}
+                // Solo dígitos: es la clave que identifica al invitado, y un
+                // espacio de más lo convertiría en otra persona.
+                onChange={(e) =>
+                  setDraft({ ...draft, phone: e.target.value.replace(/\D/g, "") })
+                }
+                required
               />
             </DraftField>
             <DraftField label="Respuesta">
@@ -458,14 +464,6 @@ export function AdminPage() {
                   </option>
                 ))}
               </select>
-            </DraftField>
-            <DraftField label="Contacto">
-              <input
-                className="admin-input"
-                placeholder="+54 9 11 …"
-                value={draft.contact}
-                onChange={(e) => setDraft({ ...draft, contact: e.target.value })}
-              />
             </DraftField>
             <DraftField label="Notas">
               <input
@@ -557,7 +555,6 @@ export function AdminPage() {
         venueTables={venueTables}
         onEdit={startEditing}
         onChangeTable={changeTable}
-        onCopyLink={copyGuestLink}
         onSendWhatsApp={sendInvitationWhatsApp}
         onDelete={handleDelete}
       />
@@ -740,8 +737,8 @@ function Stats({ guests, seats }: { guests: Guest[]; seats: number }) {
       accepted,
       declined,
       pending: guests.length - accepted.length - declined.length,
-      // Quien tiene cédula se anotó solo desde la invitación.
-      selfRegistered: guests.filter((g) => g.cedula).length,
+      // Quien tiene fecha de respuesta se anotó solo desde la invitación.
+      selfRegistered: guests.filter((g) => g.rsvpTimestamp).length,
       adultsConfirmed,
       kidsConfirmed,
     };
@@ -853,7 +850,6 @@ type TableProps = {
   venueTables: readonly VenueTable[];
   onEdit: (guest: Guest) => void;
   onChangeTable: (guest: Guest, table: string) => void;
-  onCopyLink: (id: string) => void;
   onSendWhatsApp: (guest: Guest) => void;
   onDelete: (guest: Guest) => void;
 };
@@ -891,13 +887,11 @@ function TablePicker({
 function GuestActions({
   guest,
   onEdit,
-  onCopyLink,
   onSendWhatsApp,
   onDelete,
 }: {
   guest: Guest;
   onEdit: (guest: Guest) => void;
-  onCopyLink: (id: string) => void;
   onSendWhatsApp: (guest: Guest) => void;
   onDelete: (guest: Guest) => void;
 }) {
@@ -920,14 +914,6 @@ function GuestActions({
         <FaWhatsapp size={17} aria-hidden="true" />
       </button>
       <button
-        className="icon-action"
-        onClick={() => onCopyLink(guest.id)}
-        title="Copiar link"
-        aria-label={`Copiar link de ${guest.name}`}
-      >
-        <LuLink size={16} aria-hidden="true" />
-      </button>
-      <button
         className="icon-action icon-action--danger"
         onClick={() => onDelete(guest)}
         title="Eliminar"
@@ -946,7 +932,6 @@ function GuestTable({
   venueTables,
   onEdit,
   onChangeTable,
-  onCopyLink,
   onSendWhatsApp,
   onDelete,
 }: TableProps) {
@@ -971,11 +956,7 @@ function GuestTable({
               <div className="min-w-0">
                 <div className="font-medium text-ink">{guest.name}</div>
                 <div className="text-[0.78rem] text-subtle">
-                  {guest.cedula ? (
-                    formatCedula(guest.cedula)
-                  ) : (
-                    <span className="italic">Cargado a mano</span>
-                  )}
+                  {guest.phone || <span className="italic">Sin teléfono</span>}
                 </div>
               </div>
               <ResponsePill response={guest.response} />
@@ -992,8 +973,7 @@ function GuestTable({
               <GuestActions
                 guest={guest}
                 onEdit={onEdit}
-                onCopyLink={onCopyLink}
-                onSendWhatsApp={onSendWhatsApp}
+                        onSendWhatsApp={onSendWhatsApp}
                 onDelete={onDelete}
               />
             </footer>
@@ -1025,14 +1005,10 @@ function GuestTable({
               <tr key={guest.id} className="border-t border-bone hover:bg-soft/30 transition-colors">
                 <Td>
                   <div className="font-medium text-ink">{guest.name}</div>
-                  {/* La cédula va bajo el nombre: distingue de un vistazo a
-                      quien se anotó solo de quien cargó el admin a mano. */}
+                  {/* El teléfono va bajo el nombre: es la clave del invitado
+                      y lo que se usa para ubicarlo. */}
                   <div className="text-[0.78rem] text-subtle">
-                    {guest.cedula ? (
-                      formatCedula(guest.cedula)
-                    ) : (
-                      <span className="italic">Cargado a mano</span>
-                    )}
+                    {guest.phone || <span className="italic">Sin teléfono</span>}
                   </div>
                 </Td>
                 <Td>
@@ -1050,8 +1026,7 @@ function GuestTable({
                     <GuestActions
                       guest={guest}
                       onEdit={onEdit}
-                      onCopyLink={onCopyLink}
-                      onSendWhatsApp={onSendWhatsApp}
+                                    onSendWhatsApp={onSendWhatsApp}
                       onDelete={onDelete}
                     />
                   </div>

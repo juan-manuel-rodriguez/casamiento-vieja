@@ -86,7 +86,7 @@ function run(sheets, props = {}) {
     console,
   };
   const keys = Object.keys(sandbox);
-  const fn = new Function(...keys, src + "\n;return { migrateGuestsToSelfRegistration_, migrateSongRecsDropGuestId_, GUESTS_HEADERS, SONG_RECS_HEADERS, mapGuestRow_, handleSubmitRsvp_, handleUpsertGuest_, readGuests_, normalizeCedula_, isValidCedula_ };");
+  const fn = new Function(...keys, src + "\n;return { migrateGuestsToSelfRegistration_, migrateGuestsCedulaToPhone_, migrateSongRecsDropGuestId_, GUESTS_HEADERS, SONG_RECS_HEADERS, mapGuestRow_, handleSubmitRsvp_, handleUpsertGuest_, readGuests_, normalizePhone_ };");
   return { api: fn(...keys.map((k) => sandbox[k])), props };
 }
 
@@ -102,9 +102,10 @@ function run(sheets, props = {}) {
   ]);
   const { api } = run({ guests });
   api.migrateGuestsToSelfRegistration_();
+  api.migrateGuestsCedulaToPhone_();
 
   assert.deepEqual(guests._grid[0], api.GUESTS_HEADERS, "headers nuevos");
-  assert.equal(guests._grid[0].length, 11, "11 columnas");
+  assert.equal(guests._grid[0].length, 10, "10 columnas");
 
   const rows = guests._grid.slice(1).map((r) => api.mapGuestRow_(r, 0));
   assert.equal(rows.length, 3, "no se pierde ninguna fila");
@@ -114,9 +115,8 @@ function run(sheets, props = {}) {
   assert.equal(ana.adultsConfirmed, 3, "aceptó: conserva lo confirmado");
   assert.equal(ana.kidsConfirmed, 1);
   assert.equal(ana.table, "5", "conserva la mesa");
-  assert.equal(ana.contact, "099111", "conserva el contacto");
+  assert.equal(ana.phone, "099111", "el contacto viejo pasa a ser el teléfono");
   assert.equal(ana.comment, "sin gluten");
-  assert.equal(ana.cedula, "", "los que ya existían no tienen cédula");
 
   const luis = rows[1];
   assert.equal(luis.adultsConfirmed, 2, "sin responder: el cupo pasa a esperado");
@@ -127,8 +127,8 @@ function run(sheets, props = {}) {
   assert.equal(mario.adultsConfirmed, 0, "declinó: cero");
   assert.equal(mario.table, "7", "aunque declinó conserva la mesa");
 
-  assert.equal(guests._formats.get("2:3"), "@", "la cédula queda en formato texto");
-  console.log("PASS  migra el esquema viejo conservando datos, mesas y contactos");
+  assert.equal(guests._formats.get("2:3"), "@", "el teléfono queda en formato texto");
+  console.log("PASS  migra de cupos a teléfono conservando datos, mesas y contactos");
 }
 
 // --- Caso 2: idempotencia ---
@@ -138,22 +138,26 @@ function run(sheets, props = {}) {
   ]);
   const { api, props } = run({ guests });
   api.migrateGuestsToSelfRegistration_();
+  api.migrateGuestsCedulaToPhone_();
   const after = JSON.stringify(guests._grid);
   api.migrateGuestsToSelfRegistration_();
-  assert.equal(JSON.stringify(guests._grid), after, "correrla dos veces no cambia nada");
+  api.migrateGuestsCedulaToPhone_();
+  assert.equal(JSON.stringify(guests._grid), after, "correrlas dos veces no cambia nada");
   assert.equal(props.GUESTS_SCHEMA, "v2");
+  assert.equal(props.GUESTS_PHONE_SCHEMA, "v3");
   console.log("PASS  es idempotente");
 }
 
 // --- Caso 3: hoja ya migrada, sin la property (restaurada del historial) ---
 {
   const guests = makeSheet(
-    ["id","name","cedula","response","adultsConfirmed","kidsConfirmed","comment","rsvpTimestamp","contact","notes","table"],
-    [["id-1","Ana","12345672","accept",2,0,"","","","","3"]]);
+    ["id","name","phone","response","adultsConfirmed","kidsConfirmed","comment","rsvpTimestamp","notes","table"],
+    [["id-1","Ana","099123456","accept",2,0,"","","","3"]]);
   const { api } = run({ guests });
   api.migrateGuestsToSelfRegistration_();
+  api.migrateGuestsCedulaToPhone_();
   const row = api.mapGuestRow_(guests._grid[1], 0);
-  assert.equal(row.cedula, "12345672", "no pisa una hoja ya migrada");
+  assert.equal(row.phone, "099123456", "no pisa una hoja ya migrada");
   assert.equal(row.table, "3");
   console.log("PASS  detecta por el header y no re-migra");
 }
@@ -175,62 +179,70 @@ function run(sheets, props = {}) {
   const guests = makeSheet(OLD_HEADERS, []);
   const { api } = run({ guests });
   api.migrateGuestsToSelfRegistration_();
+  api.migrateGuestsCedulaToPhone_();
   assert.deepEqual(guests._grid[0], api.GUESTS_HEADERS);
   assert.equal(guests._grid.length, 1, "solo headers");
   console.log("PASS  hoja vacía no rompe");
 }
 
 
-// --- Caso 6: auto-registro y unicidad por cédula ---
+// --- Caso 6: auto-registro, unicidad y aviso antes de pisar ---
 {
-  const NEW = ["id","name","cedula","response","adultsConfirmed","kidsConfirmed","comment","rsvpTimestamp","contact","notes","table"];
-  const guests = makeSheet(NEW, []);
+  const guests = makeSheet(["id","name","phone","response","adultsConfirmed","kidsConfirmed","comment","rsvpTimestamp","notes","table"], []);
   guests.appendRow = function (row) { this._grid.push(row.slice()); };
-  const { api } = run({ guests }, { INVITE_CODE: "codigo-ok", GUESTS_SCHEMA: "v2" });
+  const { api } = run({ guests }, { INVITE_CODE: "codigo-ok", GUESTS_SCHEMA: "v2", GUESTS_PHONE_SCHEMA: "v3" });
 
-  const first = api.handleSubmitRsvp_({ code: "codigo-ok", name: "Ana  Pérez", cedula: "1.234.567-2",
-    response: "accept", adultsConfirmed: 2, kidsConfirmed: 1, comment: "sin gluten" });
+  const base = { code: "codigo-ok", name: "Ana  Pérez", phone: "099 123 456", response: "accept" };
+  const first = api.handleSubmitRsvp_({ ...base, adultsConfirmed: 2, kidsConfirmed: 1, comment: "sin gluten" });
   assert.equal(first.created, true, "la primera crea la fila");
   assert.equal(api.readGuests_().length, 1);
+  assert.equal(api.readGuests_()[0].phone, "099123456", "guarda solo los dígitos");
+  assert.equal(api.readGuests_()[0].name, "Ana Pérez", "colapsa los espacios de más");
 
-  // el admin la sienta en una mesa
-  guests._grid[1][10] = "4";
+  guests._grid[1][9] = "4"; // el admin la sienta en una mesa
 
-  const second = api.handleSubmitRsvp_({ code: "codigo-ok", name: "Ana Pérez", cedula: "12345672",
-    response: "accept", adultsConfirmed: 3, kidsConfirmed: 0, comment: "" });
-  assert.equal(second.created, false, "la segunda actualiza, no crea");
-  const list = api.readGuests_();
-  assert.equal(list.length, 1, "sigue habiendo UNA sola fila");
-  assert.equal(list[0].adultsConfirmed, 3, "se actualizó la cantidad");
-  assert.equal(list[0].kidsConfirmed, 0);
-  assert.equal(list[0].table, "4", "conserva la mesa: reeditar no desienta");
-  assert.equal(list[0].name, "Ana Pérez", "colapsa los espacios de más");
-  console.log("PASS  misma cédula con y sin puntos = una sola fila, conservando la mesa");
+  // Segundo envío con el mismo número: avisa en vez de pisar.
+  const warned = api.handleSubmitRsvp_({ ...base, phone: "099-123-456", adultsConfirmed: 3, kidsConfirmed: 0 });
+  assert.equal(warned.ok, false, "no escribe");
+  assert.equal(warned.needsConfirmation, true, "avisa que ya hay registro");
+  assert.equal(warned.previousResponse, "accept", "dice qué había, no de quién");
+  assert.equal(api.readGuests_()[0].adultsConfirmed, 2, "la fila quedó intacta");
 
-  assert.throws(() => api.handleSubmitRsvp_({ code: "mal", name: "X", cedula: "12345672", response: "accept", adultsConfirmed: 1, kidsConfirmed: 0 }), /código de invitación inválido/, "rechaza código inválido");
-  assert.throws(() => api.handleSubmitRsvp_({ code: "codigo-ok", name: "X", cedula: "12345673", response: "accept", adultsConfirmed: 1, kidsConfirmed: 0 }), /cédula inválida/, "rechaza cédula con verificador malo");
-  assert.throws(() => api.handleSubmitRsvp_({ code: "codigo-ok", name: "X", cedula: "12345672", response: "accept", adultsConfirmed: 99, kidsConfirmed: 0 }), /out of range/, "acota la cantidad de gente");
-  console.log("PASS  rechaza código inválido, cédula inválida y cantidades absurdas");
+  // Recién con la confirmación explícita, pisa.
+  const replaced = api.handleSubmitRsvp_({ ...base, phone: "099-123-456", adultsConfirmed: 3, kidsConfirmed: 0, confirmReplace: true });
+  assert.equal(replaced.created, false, "actualiza, no crea");
+  assert.equal(api.readGuests_().length, 1, "sigue habiendo UNA sola fila");
+  assert.equal(api.readGuests_()[0].adultsConfirmed, 3, "ahora sí se actualizó");
+  assert.equal(api.readGuests_()[0].table, "4", "conserva la mesa: reeditar no desienta");
+  console.log("PASS  avisa antes de pisar y solo escribe con confirmación explícita");
 
-  const declined = api.handleSubmitRsvp_({ code: "codigo-ok", name: "Luis", cedula: "1234561",
+  // El prefijo país NO se normaliza: es otra clave, y crea otra fila.
+  const withCode = api.handleSubmitRsvp_({ ...base, phone: "+598 99 123 456", adultsConfirmed: 1, kidsConfirmed: 0 });
+  assert.equal(withCode.created, true, "el prefijo país cuenta como otro número");
+  assert.equal(api.readGuests_().length, 2);
+  console.log("PASS  el prefijo país es otra clave, a propósito");
+
+  assert.throws(() => api.handleSubmitRsvp_({ ...base, code: "mal", adultsConfirmed: 1, kidsConfirmed: 0 }), /código de invitación inválido/);
+  assert.throws(() => api.handleSubmitRsvp_({ ...base, phone: "123", adultsConfirmed: 1, kidsConfirmed: 0 }), /teléfono inválido/);
+  assert.throws(() => api.handleSubmitRsvp_({ ...base, adultsConfirmed: 99, kidsConfirmed: 0, confirmReplace: true }), /out of range/);
+  console.log("PASS  rechaza código inválido, teléfono inválido y cantidades absurdas");
+
+  const declined = api.handleSubmitRsvp_({ code: "codigo-ok", name: "Luis", phone: "27123456",
     response: "decline", adultsConfirmed: 5, kidsConfirmed: 5 });
   assert.equal(declined.created, true);
-  const luis = api.readGuests_().find((g) => g.name === "Luis");
-  assert.equal(luis.adultsConfirmed, 0, "declinar fuerza cero");
-  assert.equal(luis.cedula, "01234561", "guarda la cédula normalizada con ceros");
-  console.log("PASS  declinar deja el conteo en cero y normaliza la cédula");
+  assert.equal(api.readGuests_().find((g) => g.name === "Luis").adultsConfirmed, 0, "declinar fuerza cero");
+  console.log("PASS  declinar deja el conteo en cero");
 }
 
-// --- Caso 7: el admin no puede robar una cédula ajena ---
+// --- Caso 7: el admin no puede robar un teléfono ajeno ---
 {
-  const NEW = ["id","name","cedula","response","adultsConfirmed","kidsConfirmed","comment","rsvpTimestamp","contact","notes","table"];
-  const guests = makeSheet(NEW, [["id-1","Ana","12345672","accept",2,0,"","","","",""]]);
+  const guests = makeSheet(["id","name","phone","response","adultsConfirmed","kidsConfirmed","comment","rsvpTimestamp","notes","table"], [["id-1","Ana","099123456","accept",2,0,"","","",""]]);
   guests.appendRow = function (row) { this._grid.push(row.slice()); };
-  const { api } = run({ guests }, { INVITE_CODE: "c", GUESTS_SCHEMA: "v2", ADMIN_PASSPHRASE: "p" });
-  assert.throws(() => api.handleUpsertGuest_({ guest: { name: "Otro", cedula: "12345672", response: "accept", adultsConfirmed: 1, kidsConfirmed: 0 } }), /ya hay un invitado con esa cédula/);
-  const manual = api.handleUpsertGuest_({ guest: { name: "Abuela", cedula: "", response: "accept", adultsConfirmed: 2, kidsConfirmed: 0 } });
-  assert.equal(manual.created, true, "el admin da de alta sin cédula");
-  console.log("PASS  cédula única, y el alta manual va sin cédula");
+  const { api } = run({ guests }, { INVITE_CODE: "c", GUESTS_SCHEMA: "v2", GUESTS_PHONE_SCHEMA: "v3", ADMIN_PASSPHRASE: "p" });
+  assert.throws(() => api.handleUpsertGuest_({ guest: { name: "Otro", phone: "099 123 456", response: "accept", adultsConfirmed: 1, kidsConfirmed: 0 } }), /ya hay un invitado con ese teléfono/);
+  const manual = api.handleUpsertGuest_({ guest: { name: "Abuela", phone: "24001122", response: "accept", adultsConfirmed: 2, kidsConfirmed: 0 } });
+  assert.equal(manual.created, true, "el admin da de alta con su propio teléfono");
+  console.log("PASS  teléfono único entre filas");
 }
 
 console.log("\nOK: migración y auto-registro verificados");

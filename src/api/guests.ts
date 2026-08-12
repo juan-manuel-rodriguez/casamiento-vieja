@@ -5,11 +5,10 @@ export type Guest = {
   id: string;
   name: string;
   /**
-   * Clave con la que el invitado se reconoce al confirmar. Va vacía en los que
-   * carga el admin a mano: de esa gente no hay forma de saber la cédula, y como
-   * nunca se va a auto-registrar, tampoco hace falta.
+   * Clave con la que se reconoce al invitado, y por donde se lo contacta.
+   * Solo dígitos.
    */
-  cedula: string;
+  phone: string;
   /** Número de mesa como texto (ver VENUE_TABLES), o "" si no está sentado. */
   table: string;
   response: "accept" | "decline" | "";
@@ -17,7 +16,6 @@ export type Guest = {
   kidsConfirmed: number;
   comment: string;
   rsvpTimestamp: string;
-  contact: string;
   notes: string;
 };
 
@@ -43,12 +41,11 @@ export async function fetchInviteCode(auth: string): Promise<string> {
 export type GuestInput = {
   id?: string;
   name: string;
-  cedula: string;
+  phone: string;
   table: string;
   response: "accept" | "decline" | "";
   adultsConfirmed: number;
   kidsConfirmed: number;
-  contact: string;
   notes: string;
 };
 

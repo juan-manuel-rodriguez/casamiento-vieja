@@ -38,22 +38,20 @@
 
 /**
  * Los invitados. La fila se crea cuando la persona confirma: declara su
- * nombre, su cédula y cuánta gente lleva. `cedula` es la clave con la que se
- * la reconoce si vuelve a completar el formulario, y va vacía en los que carga
- * el admin a mano —gente mayor a la que no se le manda el link y de la que no
- * hay forma de saber la cédula.
+ * nombre, su teléfono y cuánta gente lleva. `phone` es la clave con la que se
+ * la reconoce si vuelve a completar el formulario, y además es por donde se la
+ * contacta: reemplazó a la vieja columna `contact`, que era el mismo dato.
  * @const {Array<string>}
  */
 var GUESTS_HEADERS = [
   'id',
   'name',
-  'cedula',
+  'phone',
   'response',
   'adultsConfirmed',
   'kidsConfirmed',
   'comment',
   'rsvpTimestamp',
-  'contact',
   'notes',
   'table',
 ];
@@ -118,7 +116,7 @@ var INVITE_CODE_KEY = 'INVITE_CODE';
  * deployment" mints a second URL instead of updating the one the app calls.
  * @const {string}
  */
-var CODE_VERSION = '2026-08-12.1';
+var CODE_VERSION = '2026-08-12.2';
 
 // ---------- Public bootstrap ----------
 
@@ -131,6 +129,7 @@ function setup() {
   // compara y pisa la fila de headers, así que si corriera primero dejaría los
   // datos viejos reetiquetados en silencio, leyendo `adultSlots` como `cedula`.
   migrateGuestsToSelfRegistration_();
+  migrateGuestsCedulaToPhone_();
   ensureSheetWithHeaders_(GUESTS_TAB, GUESTS_HEADERS);
   ensureTextColumns_();
   migrateSongRecsDropGuestId_();
@@ -223,17 +222,78 @@ function migrateGuestsToSelfRegistration_() {
       ];
     });
 
+    // Los headers de ESTE paso van escritos a mano y no desde GUESTS_HEADERS:
+    // esa constante sigue al esquema actual, que ya avanzó, y usarla acá
+    // pondría los nombres de hoy sobre datos con la forma de este paso.
+    var v2Headers = ['id', 'name', 'cedula', 'response', 'adultsConfirmed',
+      'kidsConfirmed', 'comment', 'rsvpTimestamp', 'contact', 'notes', 'table'];
+
     // clear() y no clearContents(): hay que borrar las tres columnas sobrantes,
-    // porque readSheet_ lee getLastColumn() y no GUESTS_HEADERS.length.
+    // porque readSheet_ lee getLastColumn() y no la cantidad de headers.
+    sheet.clear();
+    sheet.getRange(1, 1, 1, v2Headers.length).setValues([v2Headers]);
+    if (migrated.length > 0) {
+      sheet.getRange(2, 1, migrated.length, v2Headers.length).setValues(migrated);
+    }
+    sheet.setFrozenRows(1);
+    // clear() se llevó los formatos, así que hay que reponerlos acá mismo.
+    applyGuestTextFormats_(sheet);
+    props.setProperty(GUESTS_SCHEMA_KEY, 'v2');
+  });
+}
+
+/** @const {string} */ var GUESTS_PHONE_KEY = 'GUESTS_PHONE_SCHEMA';
+
+/**
+ * Reemplaza la cédula por el teléfono como identificador.
+ *
+ * El teléfono ya estaba en la planilla, en la columna `contact`: era el mismo
+ * dato. Así que la columna nueva se llena desde ahí y se van las dos viejas.
+ * La cédula se descarta: no es un teléfono y no hay forma de derivar uno.
+ *
+ * Esquema del que viene: id, name, cedula, response, adultsConfirmed,
+ * kidsConfirmed, comment, rsvpTimestamp, contact, notes, table.
+ */
+function migrateGuestsCedulaToPhone_() {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty(GUESTS_PHONE_KEY)) return;
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(GUESTS_TAB);
+  if (!sheet || sheet.getLastColumn() < 3) {
+    props.setProperty(GUESTS_PHONE_KEY, 'v3');
+    return;
+  }
+
+  withWriteLock_(function () {
+    var headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    if (headerRow[2] !== 'cedula') {
+      props.setProperty(GUESTS_PHONE_KEY, 'v3');
+      return;
+    }
+    var lastRow = sheet.getLastRow();
+    var data = lastRow >= 2 ? sheet.getRange(2, 1, lastRow - 1, 11).getValues() : [];
+    var migrated = data.map(function (r) {
+      return [
+        r[0],                        // id
+        r[1],                        // name
+        normalizePhone_(r[8]),       // phone, que venía en `contact`
+        r[3],                        // response
+        Math.max(0, Number(r[4]) || 0),
+        Math.max(0, Number(r[5]) || 0),
+        r[6],                        // comment
+        r[7],                        // rsvpTimestamp
+        r[9],                        // notes
+        r[10],                       // table
+      ];
+    });
+
     sheet.clear();
     sheet.getRange(1, 1, 1, GUESTS_HEADERS.length).setValues([GUESTS_HEADERS]);
     if (migrated.length > 0) {
       sheet.getRange(2, 1, migrated.length, GUESTS_HEADERS.length).setValues(migrated);
     }
     sheet.setFrozenRows(1);
-    // clear() se llevó los formatos, así que hay que reponerlos acá mismo.
     applyGuestTextFormats_(sheet);
-    props.setProperty(GUESTS_SCHEMA_KEY, 'v2');
+    props.setProperty(GUESTS_PHONE_KEY, 'v3');
   });
 }
 
@@ -332,15 +392,15 @@ function ensureSettingsTextColumn_() {
  * triggers a reformat on the next request.
  * @const {Array<number>} 1-based indexes into GUESTS_HEADERS.
  */
-var TEXT_COLUMNS_ = [2, 3, 7, 9, 10, 11];
+var TEXT_COLUMNS_ = [2, 3, 7, 9, 10];
 
-/** Índice de `cedula` dentro de TEXT_COLUMNS_: es la que decide el guard. */
-var CEDULA_COLUMN_ = 3;
+/** Columna de `phone`: es la que decide si hace falta reaplicar formatos. */
+var PHONE_COLUMN_ = 3;
 
 function ensureTextColumns_() {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(GUESTS_TAB);
   if (!sheet) return;
-  if (sheet.getRange(2, CEDULA_COLUMN_).getNumberFormat() === '@') return;
+  if (sheet.getRange(2, PHONE_COLUMN_).getNumberFormat() === '@') return;
   var rowCount = sheet.getMaxRows() - 1;
   if (rowCount < 1) return;
   for (var i = 0; i < TEXT_COLUMNS_.length; i++) {
@@ -552,30 +612,22 @@ function getInviteCode_() {
 }
 
 /**
- * Cédula uruguaya en forma canónica: 8 dígitos con ceros a la izquierda.
- * Sin el relleno, "1234561" y "01234561" serían la misma persona y dos claves
- * distintas, y la unicidad fallaría en silencio.
+ * Teléfono en forma canónica: solo dígitos.
  *
- * ESPEJO de src/lib/cedula.ts. Si cambia una, cambia la otra; los casos de
- * prueba están en src/lib/cedula.test.ts y valen para las dos.
+ * No se toca el prefijo país ni el cero inicial, a propósito: hay invitados de
+ * otros países y recortarlos rompería sus números. El costo es que quien
+ * escriba su número de dos formas distintas queda dos veces; por eso el
+ * formulario fuerza el formato en el input.
+ *
+ * ESPEJO de src/lib/phone.ts. Si cambia una, cambia la otra; los casos de
+ * prueba están en src/lib/phone.test.ts y valen para las dos.
  * @param {*} raw
- * @returns {string} "" si no es normalizable.
+ * @returns {string} "" si no puede ser un teléfono.
  */
-function normalizeCedula_(raw) {
-  var digits = String(raw == null ? '' : raw).replace(/\D/g, '');
-  if (digits.length < 6 || digits.length > 8) return '';
-  while (digits.length < 8) digits = '0' + digits;
+function normalizePhone_(raw) {
+  var digits = String(raw == null ? '' : raw).replace(/[^0-9]/g, '');
+  if (digits.length < 6 || digits.length > 20) return '';
   return digits;
-}
-
-/** Valida el dígito verificador. Espejo de isValidCedula en src/lib/cedula.ts. */
-function isValidCedula_(raw) {
-  var digits = normalizeCedula_(raw);
-  if (!digits) return false;
-  var weights = [2, 9, 8, 7, 6, 3, 4];
-  var sum = 0;
-  for (var i = 0; i < weights.length; i++) sum += Number(digits.charAt(i)) * weights[i];
-  return (10 - (sum % 10)) % 10 === Number(digits.charAt(7));
 }
 
 /**
@@ -639,27 +691,28 @@ function getSpotifyToken_() {
 /**
  * Confirmación del invitado, que se registra solo.
  *
- * La fila se crea acá: antes de confirmar, la persona no existe. La cédula es
- * la clave — si ya confirmó y vuelve a completar el formulario, se actualiza su
- * fila en lugar de duplicarla.
+ * La fila se crea acá: antes de confirmar, la persona no existe. El teléfono
+ * es la clave — si ese número ya confirmó, se actualiza su fila en lugar de
+ * duplicarla.
+ *
+ * Pisar una confirmación ajena por un número mal tipeado sería silencioso y
+ * caro, así que no se pisa de una: si el teléfono ya tiene registro, se
+ * responde `needsConfirmation` y el formulario pregunta antes. El segundo
+ * envío llega con `confirmReplace`.
  *
  * Todo el ciclo leer-decidir-escribir va dentro del lock: si la búsqueda
- * quedara afuera, dos envíos simultáneos de la misma cédula crearían dos filas.
+ * quedara afuera, dos envíos simultáneos del mismo número crearían dos filas.
  *
- * Al pisar una fila existente se conservan `table`, `contact` y `notes`, que
- * son del admin: reeditar la confirmación no tiene por qué desentar a nadie.
- *
- * Nota: quien tenga el código puede pisar la confirmación de otro si conoce su
- * cédula. Es un compromiso aceptado — no puede leerla, solo sobrescribirla, y
- * las filas que carga el admin no tienen cédula, así que no son alcanzables.
+ * Al pisar se conservan `table` y `notes`, que son del admin: reeditar la
+ * confirmación no tiene por qué desentar a nadie.
  * @param {Object} params
- * @returns {{ok: true, created: boolean}}
+ * @returns {{ok: boolean, created?: boolean, needsConfirmation?: boolean, previousResponse?: string}}
  */
 function handleSubmitRsvp_(params) {
   requirePublicAccess_(params);
   var name = requireString_(params, 'name').replace(/\s+/g, ' ').slice(0, 80);
-  var cedula = normalizeCedula_(requireString_(params, 'cedula'));
-  if (!isValidCedula_(cedula)) throw new Error('cédula inválida');
+  var phone = normalizePhone_(requireString_(params, 'phone'));
+  if (!phone) throw new Error('teléfono inválido');
 
   var response = requireString_(params, 'response');
   if (response !== RESPONSE_ACCEPT && response !== RESPONSE_DECLINE) {
@@ -672,20 +725,31 @@ function handleSubmitRsvp_(params) {
     kidsConfirmed = requireInt_(params, 'kidsConfirmed', 0, MAX_PARTY_KIDS_);
   }
   var comment = params.comment == null ? '' : String(params.comment).slice(0, 500);
+  var confirmReplace = Boolean(params.confirmReplace);
 
   return withWriteLock_(function () {
     var sheet = sheetByName_(GUESTS_TAB);
-    var existing = findByCedula_(readGuests_(), cedula);
+    var existing = findByPhone_(readGuests_(), phone);
+
+    if (existing && !confirmReplace) {
+      // Se dice QUÉ había, no de quién: alcanza para que la persona se dé
+      // cuenta de que se equivocó de número, sin exponer datos de otro.
+      return {
+        ok: false,
+        needsConfirmation: true,
+        previousResponse: existing.response || '',
+      };
+    }
+
     var row = [
       existing ? existing.id : Utilities.getUuid(),
       name,
-      cedula,
+      phone,
       response,
       adultsConfirmed,
       kidsConfirmed,
       comment,
       new Date(),
-      existing ? existing.contact : '',
       existing ? existing.notes : '',
       existing ? existing.table : '',
     ];
@@ -695,23 +759,24 @@ function handleSubmitRsvp_(params) {
     }
     sheet.appendRow(row);
     // La fila recién agregada puede caer más allá del rango que formateó
-    // ensureTextColumns_, y sin formato de texto la cédula pierde los ceros.
+    // ensureTextColumns_, y sin formato de texto el teléfono se guarda como
+    // número y pierde el cero inicial.
     applyGuestTextFormats_(sheet);
     return { ok: true, created: true };
   });
 }
 
 /**
- * Busca por cédula normalizando también lo que está en la planilla, para
- * tolerar una tipeada a mano con puntos.
+ * Busca por teléfono normalizando también lo que está en la planilla, para
+ * tolerar un número tipeado a mano con espacios.
  * @param {Array<Guest>} list
- * @param {string} cedula
+ * @param {string} phone
  * @returns {Guest|null}
  */
-function findByCedula_(list, cedula) {
-  if (!cedula) return null;
+function findByPhone_(list, phone) {
+  if (!phone) return null;
   for (var i = 0; i < list.length; i++) {
-    if (normalizeCedula_(list[i].cedula) === cedula) return list[i];
+    if (normalizePhone_(list[i].phone) === phone) return list[i];
   }
   return null;
 }
@@ -786,8 +851,8 @@ function handleSubmitSongRecommendation_(params) {
  * mande. Si el invitado y el admin editan a la vez, gana el último; los dos
  * caminos toman el mismo lock, así que no hay corrupción.
  *
- * La cédula es opcional —los cargados a mano no la tienen— pero si viene, tiene
- * que ser válida y no puede pertenecer a otra fila.
+ * El teléfono es la clave: si viene, tiene que ser válido y no puede
+ * pertenecer a otra fila.
  * @param {Object} params
  * @returns {{ok: true, created: boolean, id: string}}
  */
@@ -795,15 +860,14 @@ function handleUpsertGuest_(params) {
   var input = params.guest || {};
   var name = requireString_(input, 'name');
   var providedId = String(input.id || '').trim();
-  var cedula = normalizeCedula_(input.cedula);
-  if (String(input.cedula || '').trim() && !isValidCedula_(cedula)) {
-    throw new Error('cédula inválida');
+  var phone = normalizePhone_(input.phone);
+  if (String(input.phone || '').trim() && !phone) {
+    throw new Error('teléfono inválido');
   }
   var response = String(input.response || '').trim();
   if (response !== RESPONSE_ACCEPT && response !== RESPONSE_DECLINE) response = '';
   var adultsConfirmed = Math.max(0, Math.round(Number(input.adultsConfirmed) || 0));
   var kidsConfirmed = Math.max(0, Math.round(Number(input.kidsConfirmed) || 0));
-  var contact = input.contact == null ? '' : String(input.contact);
   var notes = input.notes == null ? '' : String(input.notes);
   // Texto libre a propósito: la lista de mesas vive en el frontend, y un valor
   // tipeado directo en la planilla tiene que sobrevivir a una edición.
@@ -814,22 +878,21 @@ function handleUpsertGuest_(params) {
     var list = readGuests_();
     var id = providedId || Utilities.getUuid();
     var existing = findInList_(list, id);
-    if (cedula) {
-      var owner = findByCedula_(list, cedula);
+    if (phone) {
+      var owner = findByPhone_(list, phone);
       if (owner && owner.id !== id) {
-        throw new Error('ya hay un invitado con esa cédula: ' + owner.name);
+        throw new Error('ya hay un invitado con ese teléfono: ' + owner.name);
       }
     }
     var row = [
       id,
       name,
-      cedula,
+      phone,
       response,
       adultsConfirmed,
       kidsConfirmed,
       existing ? existing.comment : '',
       existing ? existing.rsvpTimestamp : '',
-      contact,
       notes,
       table,
     ];
@@ -1066,10 +1129,10 @@ function ensureSheetWithHeaders_(name, headers) {
 }
 
 /**
- * @typedef {{rowIndex: number, id: string, name: string, cedula: string,
+ * @typedef {{rowIndex: number, id: string, name: string, phone: string,
  *           response: string, adultsConfirmed: number, kidsConfirmed: number,
- *           comment: string, rsvpTimestamp: string, contact: string,
- *           notes: string, table: string}} Guest
+ *           comment: string, rsvpTimestamp: string, notes: string,
+ *           table: string}} Guest
  */
 
 /**
@@ -1131,15 +1194,14 @@ function mapGuestRow_(row, rowIndex) {
     rowIndex: rowIndex,
     id: String(row[0] || ''),
     name: String(row[1] || ''),
-    cedula: String(row[2] || ''),
+    phone: String(row[2] || ''),
     response: String(row[3] || ''),
     adultsConfirmed: Math.max(0, Number(row[4] || 0)),
     kidsConfirmed: Math.max(0, Number(row[5] || 0)),
     comment: String(row[6] || ''),
     rsvpTimestamp: row[7] instanceof Date ? row[7].toISOString() : String(row[7] || ''),
-    contact: String(row[8] || ''),
-    notes: String(row[9] || ''),
-    table: String(row[10] || ''),
+    notes: String(row[8] || ''),
+    table: String(row[9] || ''),
   };
 }
 

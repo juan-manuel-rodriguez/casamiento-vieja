@@ -11,7 +11,7 @@ que quedó como remote `upstream`: los arreglos se traen con `git cherry-pick`.
 
 - **Frontend**: React + Vite, dos rutas: `/?code=XXX` (invitado) y `/admin`.
   El link de la invitación es **uno solo para todos**: cada persona se anota
-  sola al confirmar y su cédula es la clave que la identifica.
+  sola al confirmar y su teléfono es la clave que la identifica.
 - **Backend**: un Google Apps Script "container-bound" al Sheet, deployado como
   Web App. Maneja la lectura pública del invitado, la escritura del RSVP, y el
   CRUD del admin (este último validando una contraseña compartida).
@@ -114,14 +114,15 @@ Para ver la página del invitado sin Sheet ni nada cableado, agregá `?demo`:
 - **Mandar la invitación**: entrá a `/admin`, ingresá la contraseña del Apps
   Script una vez (se guarda en el navegador) y copiá el link de arriba. Es el
   mismo para todos.
-- **Los invitados se anotan solos**: al confirmar cargan nombre, cédula y
+- **Los invitados se anotan solos**: al confirmar cargan nombre, teléfono y
   cuánta gente llevan, y ahí se crea su fila. Si vuelven a completar el
-  formulario con la misma cédula, se actualiza en vez de duplicarse. No se les
-  muestran los datos que habían cargado, a propósito: así con una cédula ajena
-  no se pueden espiar los datos de otro.
+  formulario con el mismo teléfono, **se les avisa antes de reemplazar** y solo
+  se pisa si confirman. No se les muestran los datos que había cargados, a
+  propósito: con un número ajeno se puede pisar, pero no espiar.
 - **Cargar a alguien a mano**: para la gente a la que no se le manda el link,
-  usá "Agregar invitado" y ponele la respuesta y la cantidad de gente. Esos van
-  sin cédula.
+  usá "Agregar invitado" con su teléfono, su respuesta y su cantidad de gente.
+- **Mandarle el link a alguien puntual**: el botón de WhatsApp de cada fila
+  manda el link único al teléfono de esa persona.
 - **Ver respuestas**: el admin muestra el resumen, quién se anotó solo y quién
   fue cargado a mano.
 
@@ -129,10 +130,13 @@ Para ver la página del invitado sin Sheet ni nada cableado, agregá `?demo`:
 
 Pestaña `guests`:
 
-| id | name | cedula | response | adultsConfirmed | kidsConfirmed | comment | rsvpTimestamp | contact | notes | table |
+| id | name | phone | response | adultsConfirmed | kidsConfirmed | comment | rsvpTimestamp | notes | table |
 
-`cedula` va vacía en los que carga el admin a mano. `table` es el número de mesa
-como texto.
+`phone` es la clave del invitado y por donde se lo contacta: solo dígitos, sin
+espacios. **No se normaliza el prefijo país ni el cero inicial** — hay invitados
+de otros países y recortarlos rompería sus números. El costo es que quien
+escriba su número de dos formas distintas queda dos veces, y por eso el
+formulario solo acepta dígitos. `table` es el número de mesa como texto.
 
 Pestaña `songRecommendations` (la escribe el Apps Script). Es anónima: quien
 recomienda todavía no existe como invitado, porque la fila se crea al confirmar.
@@ -150,7 +154,7 @@ desde el admin.
 npm test
 ```
 
-Cubren la validación de cédula y —lo que más importa— la migración de esquema
+Cubren la validación de teléfono y —lo que más importa— las migraciones de esquema
 del Apps Script, que corre el `Code.gs` real contra una planilla simulada. Es lo
 único del proyecto que puede perder datos, así que conviene correrlo antes de
 tocar `apps-script/Code.gs`.

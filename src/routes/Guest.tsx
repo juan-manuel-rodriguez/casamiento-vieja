@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { submitRsvp, type RsvpResponse } from "../api/rsvp";
 import { fetchSettings } from "../api/settings";
-import { isValidCedula } from "../lib/cedula";
+import { isValidPhone, normalizePhone } from "../lib/phone";
 import {
   searchSongs,
   submitSongRecommendation,
@@ -50,8 +50,13 @@ export function GuestPage() {
   const [entered, setEntered] = useState(isDemo || !hasAudio);
   const playerRef = useRef<{ play: () => void } | null>(null);
   const [name, setName] = useState("");
-  const [cedula, setCedula] = useState("");
-  const [cedulaError, setCedulaError] = useState<string | null>(null);
+  const [phone, setPhone] = useState("");
+  const [phoneError, setPhoneError] = useState<string | null>(null);
+  /**
+   * Se llena cuando el backend avisa que ese teléfono ya tenía registro. El
+   * segundo envío recién ahí lleva la autorización a pisar.
+   */
+  const [pendingReplace, setPendingReplace] = useState<RsvpResponse | null>(null);
   const [adultsConfirmed, setAdultsConfirmed] = useState(1);
   const [kidsConfirmed, setKidsConfirmed] = useState(0);
   const [comment, setComment] = useState("");
@@ -94,14 +99,14 @@ export function GuestPage() {
       });
   }, [code, isDemo]);
 
-  async function respond(response: RsvpResponse) {
+  async function respond(response: RsvpResponse, confirmReplace = false) {
     if (view.kind !== "ready" || submitting) return;
     if (!name.trim()) return setSubmitError("Escribí tu nombre y apellido");
-    if (!isValidCedula(cedula)) {
-      setCedulaError("Revisá el número de cédula");
+    if (!isValidPhone(phone)) {
+      setPhoneError("Escribí tu teléfono, solo números");
       return;
     }
-    setCedulaError(null);
+    setPhoneError(null);
     setSubmitError(null);
 
     // En demo no hay backend ni código: se muestra el flujo y nada más.
@@ -109,16 +114,24 @@ export function GuestPage() {
 
     setSubmitting(true);
     try {
-      const { created } = await submitRsvp({
+      const result = await submitRsvp({
         code,
         name: name.trim(),
-        cedula,
+        phone: normalizePhone(phone),
         response,
         adultsConfirmed: response === "accept" ? adultsConfirmed : 0,
         kidsConfirmed: response === "accept" ? kidsConfirmed : 0,
         comment: comment.trim(),
+        confirmReplace,
       });
-      setView({ kind: "sent", response, created });
+      if (result.kind === "needs-confirmation") {
+        // No se escribió nada todavía: se pregunta antes de pisar, porque un
+        // número mal tipeado reemplazaría la confirmación de otra persona.
+        setPendingReplace(response);
+        return;
+      }
+      setPendingReplace(null);
+      setView({ kind: "sent", response, created: result.created });
     } catch (err: unknown) {
       setSubmitError(errorMessage(err));
     } finally {
@@ -160,9 +173,11 @@ export function GuestPage() {
             <RsvpForm
               name={name}
               setName={setName}
-              cedula={cedula}
-              setCedula={setCedula}
-              cedulaError={cedulaError}
+              phone={phone}
+              setPhone={setPhone}
+              phoneError={phoneError}
+              pendingReplace={pendingReplace}
+              onCancelReplace={() => setPendingReplace(null)}
               adultsConfirmed={adultsConfirmed}
               setAdultsConfirmed={setAdultsConfirmed}
               kidsConfirmed={kidsConfirmed}
@@ -548,9 +563,12 @@ function HangerIcon({ className }: { className?: string }) {
 type RsvpFormProps = {
   name: string;
   setName: (value: string) => void;
-  cedula: string;
-  setCedula: (value: string) => void;
-  cedulaError: string | null;
+  phone: string;
+  setPhone: (value: string) => void;
+  phoneError: string | null;
+  /** Distinto de null cuando el backend avisó que ese teléfono ya confirmó. */
+  pendingReplace: RsvpResponse | null;
+  onCancelReplace: () => void;
   adultsConfirmed: number;
   setAdultsConfirmed: (value: number) => void;
   kidsConfirmed: number;
@@ -559,15 +577,17 @@ type RsvpFormProps = {
   setComment: (value: string) => void;
   submitting: boolean;
   submitError: string | null;
-  onRespond: (response: RsvpResponse) => void;
+  onRespond: (response: RsvpResponse, confirmReplace?: boolean) => void;
 };
 
 function RsvpForm({
   name,
   setName,
-  cedula,
-  setCedula,
-  cedulaError,
+  phone,
+  setPhone,
+  phoneError,
+  pendingReplace,
+  onCancelReplace,
   adultsConfirmed,
   setAdultsConfirmed,
   kidsConfirmed,
@@ -586,8 +606,8 @@ function RsvpForm({
           Confirmá tu asistencia
         </h2>
         <p className="text-muted text-center mb-8">
-          Si ya confirmaste y querés cambiar algo, completá de nuevo con la misma
-          cédula y se actualiza.
+          Si ya confirmaste y querés cambiar algo, completá de nuevo con el mismo
+          teléfono y se actualiza.
         </p>
         {submitError && <ErrorBanner message={submitError} />}
 
@@ -605,25 +625,29 @@ function RsvpForm({
         </div>
 
         <div className="mb-6">
-          <FieldLabel htmlFor="cedula">Cédula</FieldLabel>
+          <FieldLabel htmlFor="phone">Teléfono</FieldLabel>
           <input
-            id="cedula"
-            value={cedula}
-            onChange={(event) => setCedula(event.target.value)}
-            placeholder="1.234.567-8"
+            id="phone"
+            value={phone}
+            // Solo dígitos: es la clave que te identifica, y un espacio de más
+            // te convertiría en otra persona.
+            onChange={(event) => setPhone(event.target.value.replace(/\D/g, ""))}
+            placeholder="099123456"
             inputMode="numeric"
-            autoComplete="off"
+            autoComplete="tel"
             disabled={submitting}
-            aria-invalid={Boolean(cedulaError)}
-            aria-describedby={cedulaError ? "cedula-error" : undefined}
+            aria-invalid={Boolean(phoneError)}
+            aria-describedby="phone-hint"
             className={`w-full px-4 py-3 bg-ivory border rounded focus:outline-none focus:bg-white transition-colors ${
-              cedulaError ? "border-danger" : "border-bone focus:border-gold"
+              phoneError ? "border-danger" : "border-bone focus:border-gold"
             }`}
           />
-          {/* Es lo que nos permite reconocerte si volvés a completar el
-              formulario, en vez de anotarte dos veces. */}
-          <p id="cedula-error" className="text-sm mt-1.5 mb-0 text-muted">
-            {cedulaError ? <span className="text-danger">{cedulaError}</span> : "Para reconocerte si después querés cambiar algo."}
+          <p id="phone-hint" className="text-sm mt-1.5 mb-0 text-muted">
+            {phoneError ? (
+              <span className="text-danger">{phoneError}</span>
+            ) : (
+              "Solo números, sin espacios. Es lo que nos permite reconocerte si después querés cambiar algo."
+            )}
           </p>
         </div>
 
@@ -658,24 +682,52 @@ function RsvpForm({
           />
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={() => onRespond("accept")}
-            disabled={submitting}
-          >
-            {submitting ? "Enviando…" : "Confirmo asistencia"}
-          </button>
-          <button
-            type="button"
-            className="btn-ghost"
-            onClick={() => onRespond("decline")}
-            disabled={submitting}
-          >
-            No voy a poder ir
-          </button>
-        </div>
+        {pendingReplace ? (
+          <div className="border border-gold rounded-xl bg-soft/40 p-5">
+            <p className="m-0 mb-4 text-ink">
+              Ese teléfono <strong>ya tiene una respuesta cargada</strong>. Si es
+              tuyo, la reemplazamos por lo que acabás de completar. Si no,
+              revisá el número: estarías pisando la respuesta de otra persona.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => onRespond(pendingReplace, true)}
+                disabled={submitting}
+              >
+                {submitting ? "Enviando…" : "Sí, reemplazar"}
+              </button>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={onCancelReplace}
+                disabled={submitting}
+              >
+                Revisar el número
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => onRespond("accept")}
+              disabled={submitting}
+            >
+              {submitting ? "Enviando…" : "Confirmo asistencia"}
+            </button>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => onRespond("decline")}
+              disabled={submitting}
+            >
+              No voy a poder ir
+            </button>
+          </div>
+        )}
       </div>
     </Section>
   );
@@ -821,7 +873,7 @@ function ThankYouState({ response, created }: { response: RsvpResponse; created:
   // Volver a completar el formulario con la misma cédula actualiza en vez de
   // duplicar, así que conviene decirlo: si no, parece que no pasó nada.
   const howToChange =
-    "Si necesitás cambiar algo, completá el formulario de nuevo con la misma cédula.";
+    "Si necesitás cambiar algo, completá el formulario de nuevo con el mismo teléfono.";
   if (response === "accept") {
     return (
       <StatusBlock eyebrow="Gracias" title="¡Nos vemos pronto!">
