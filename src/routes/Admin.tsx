@@ -1867,6 +1867,16 @@ function InvitationTab({
           onChange={(v) => set("audioUrl", v)}
         />
         <InvitationField
+          label="Título de la canción"
+          value={draft.audioTitle}
+          onChange={(v) => set("audioTitle", v)}
+        />
+        <InvitationField
+          label="Artista"
+          value={draft.audioArtist}
+          onChange={(v) => set("audioArtist", v)}
+        />
+        <InvitationField
           label="Tema de Spotify"
           hint="Vacío quita la portada con el botón Ver invitación."
           value={draft.spotifyTrackUrl}

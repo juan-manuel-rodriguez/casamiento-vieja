@@ -62,6 +62,9 @@ export type EventConfig = {
    * recorte de ~25 s tomado de la mitad del tema.
    */
   audioUrl: string;
+  /** Se muestran en el reproductor cuando hay audio propio. */
+  audioTitle: string;
+  audioArtist: string;
 };
 
 /**
@@ -152,6 +155,8 @@ export const DEFAULT_EVENT: EventConfig = {
   spotifyTrackUrl: "https://open.spotify.com/track/5wq9WMmC3FzC7k1x6yVfAG",
   /** Con audio propio suena el tema completo, desde el principio y en loop. */
   audioUrl: "/cancion.mp3",
+  audioTitle: "Esquina de la sombra",
+  audioArtist: "El Plan de la Mariposa",
 };
 
 /** La ocurrencia que titula la página: la última, o sea la fiesta. */

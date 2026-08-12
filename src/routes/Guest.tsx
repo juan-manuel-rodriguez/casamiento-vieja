@@ -983,6 +983,24 @@ type SpotifyIframeApi = {
  * habilitar la reproducción, sin depender de que el navegador delegue el
  * permiso de autoplay a un iframe de otro dominio.
  */
+function formatTime(seconds: number): string {
+  if (!isFinite(seconds) || seconds < 0) return "0:00";
+  const total = Math.floor(seconds);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/**
+ * Reproductor de la canción de la invitación.
+ *
+ * Sirve el archivo desde el mismo dominio: suena el tema entero desde el
+ * principio y en loop, sin que el invitado necesite cuenta en ningún lado.
+ * Al ser del mismo origen, el click de la portada alcanza para habilitar el
+ * audio, sin depender de que el navegador delegue el autoplay a un iframe
+ * ajeno.
+ *
+ * El control nativo del navegador se oculta y se dibuja uno propio: el gris
+ * de fábrica desentonaba con el resto de la página.
+ */
 function OwnAudioPlayer({
   src,
   playerRef,
@@ -990,24 +1008,97 @@ function OwnAudioPlayer({
   src: string;
   playerRef: React.MutableRefObject<{ play: () => void } | null>;
 }) {
+  const invitation = useEvent();
   const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [position, setPosition] = useState(0);
+  const [duration, setDuration] = useState(0);
 
   useEffect(() => {
     playerRef.current = {
       play: () => {
-        const audio = audioRef.current;
-        if (!audio) return;
-        void audio.play().catch(() => {
-          // El navegador rechazó la reproducción: queda el control visible
-          // para que el invitado la arranque a mano.
+        void audioRef.current?.play().catch(() => {
+          // El navegador la rechazó: queda el botón para arrancarla a mano.
         });
       },
     };
   }, [playerRef]);
 
+  function toggle() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audio.paused) void audio.play().catch(() => undefined);
+    else audio.pause();
+  }
+
+  const progress = duration > 0 ? (position / duration) * 100 : 0;
+
   return (
-    <section className="max-w-2xl mx-auto px-6 -mt-6 sm:-mt-10 mb-2">
-      <audio ref={audioRef} src={src} loop preload="auto" controls className="w-full" />
+    <section className="max-w-lg mx-auto px-6 -mt-4 mb-6">
+      <div className="flex items-center gap-4 rounded-2xl border border-brass/35 bg-white/70 px-4 py-3.5 shadow-sm">
+        <button
+          type="button"
+          onClick={toggle}
+          aria-label={playing ? "Pausar la canción" : "Reproducir la canción"}
+          className="w-12 h-12 shrink-0 rounded-full bg-ink text-ivory inline-flex items-center justify-center cursor-pointer transition-colors hover:bg-gold-dark"
+        >
+          {playing ? (
+            <svg viewBox="0 0 24 24" className="w-5 h-5" fill="currentColor" aria-hidden="true">
+              <rect x="6" y="4.5" width="4" height="15" rx="1.2" />
+              <rect x="14" y="4.5" width="4" height="15" rx="1.2" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 24 24" className="w-5 h-5 ml-0.5" fill="currentColor" aria-hidden="true">
+              <path d="M7 4.6a1 1 0 0 1 1.5-.87l11 7.4a1 1 0 0 1 0 1.74l-11 7.4A1 1 0 0 1 7 19.4V4.6Z" />
+            </svg>
+          )}
+        </button>
+
+        <div className="min-w-0 flex-1">
+          <p className="text-[0.68rem] uppercase tracking-[0.2em] text-subtle font-medium m-0">
+            Nuestra canción
+          </p>
+          <p className="font-display text-lg leading-tight text-ink truncate m-0">
+            {invitation.audioTitle}
+          </p>
+          <p className="text-sm text-muted truncate m-0">{invitation.audioArtist}</p>
+
+          <div className="flex items-center gap-2.5 mt-2">
+            <input
+              type="range"
+              min={0}
+              max={duration || 0}
+              step={0.1}
+              value={position}
+              aria-label="Posición de la canción"
+              onChange={(e) => {
+                const audio = audioRef.current;
+                if (!audio) return;
+                audio.currentTime = Number(e.target.value);
+                setPosition(Number(e.target.value));
+              }}
+              className="flex-1 h-1 appearance-none rounded-full accent-gold-dark cursor-pointer"
+              style={{
+                background: `linear-gradient(to right, var(--color-gold-dark) ${progress}%, var(--color-sand) ${progress}%)`,
+              }}
+            />
+            <span className="text-[0.7rem] text-subtle tabular-nums shrink-0">
+              {formatTime(position)} / {formatTime(duration)}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <audio
+        ref={audioRef}
+        src={src}
+        loop
+        preload="metadata"
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onTimeUpdate={(e) => setPosition(e.currentTarget.currentTime)}
+        onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+      />
     </section>
   );
 }
