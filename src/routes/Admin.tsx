@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { FaSpotify, FaWhatsapp } from "react-icons/fa6";
 import { LuPencil, LuTrash2 } from "react-icons/lu";
-import { isValidPhone, normalizePhone } from "../lib/phone";
+import { normalizePhone } from "../lib/phone";
+import { nameProblem, phoneProblem } from "../lib/guestForm";
 import {
   checkAuth,
   deleteGuest,
@@ -110,6 +111,8 @@ export function AdminPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  /** Error del formulario de invitado. Va al lado del form, no tapa el panel. */
+  const [draftError, setDraftError] = useState<string | null>(null);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [tab, setTab] = useState<TabId>("guests");
   const [busy, setBusy] = useState(false);
@@ -254,6 +257,7 @@ export function AdminPage() {
   function cancelEditing() {
     setEditingId(null);
     setDraft(EMPTY_DRAFT);
+    setDraftError(null);
     // Cancelar cierra el formulario. Dejarlo abierto y vacío parece que se
     // estuviera por dar de alta a alguien, que es lo contrario de cancelar.
     setFormOpen(false);
@@ -262,12 +266,12 @@ export function AdminPage() {
   async function handleSubmitDraft(event: React.FormEvent) {
     event.preventDefault();
     if (!auth) return;
+    // Antes esto hacía setView({kind:"error"}), que reemplazaba el panel
+    // entero por un cartel: un dedazo en el teléfono te sacaba de la pantalla.
+    const problem = nameProblem(draft.name) ?? phoneProblem(draft.phone);
+    if (problem) return setDraftError(problem);
+    setDraftError(null);
     const name = draft.name.trim();
-    if (!name) return;
-    if (!isValidPhone(draft.phone)) {
-      setView({ kind: "error", message: "Escribí un teléfono válido, solo números" });
-      return;
-    }
     setSaving(true);
     await withBusy(async () => {
       try {
@@ -474,6 +478,11 @@ export function AdminPage() {
               />
             </DraftField>
           </div>
+          {draftError && (
+            <p className="text-sm text-danger mt-4 mb-0" role="alert">
+              {draftError}
+            </p>
+          )}
           <div className="flex justify-end gap-3 mt-6">
             <button
               type="button"

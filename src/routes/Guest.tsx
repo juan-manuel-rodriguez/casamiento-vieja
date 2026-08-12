@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { submitRsvp, type RsvpResponse } from "../api/rsvp";
 import { fetchSettings } from "../api/settings";
-import { isValidPhone, normalizePhone } from "../lib/phone";
+import { normalizePhone } from "../lib/phone";
+import { nameProblem, phoneProblem } from "../lib/guestForm";
 import {
   searchSongs,
   submitSongRecommendation,
@@ -50,6 +51,7 @@ export function GuestPage() {
   const [entered, setEntered] = useState(isDemo || !hasAudio);
   const playerRef = useRef<{ play: () => void } | null>(null);
   const [name, setName] = useState("");
+  const [nameError, setNameError] = useState<string | null>(null);
   const [phone, setPhone] = useState("");
   const [phoneError, setPhoneError] = useState<string | null>(null);
   /**
@@ -101,12 +103,20 @@ export function GuestPage() {
 
   async function respond(response: RsvpResponse, confirmReplace = false) {
     if (view.kind !== "ready" || submitting) return;
-    if (!name.trim()) return setSubmitError("Escribí tu nombre y apellido");
-    if (!isValidPhone(phone)) {
-      setPhoneError("Escribí tu teléfono, solo números");
+
+    // Se validan los dos juntos y no de a uno: si fallan ambos, mostrar solo
+    // el primero obliga a mandar el formulario dos veces para enterarse.
+    const nameIssue = nameProblem(name);
+    const phoneIssue = phoneProblem(phone);
+    setNameError(nameIssue);
+    setPhoneError(phoneIssue);
+    if (nameIssue || phoneIssue) {
+      setSubmitError(null);
+      // El foco va al primero que falló: en el celular el campo con problema
+      // puede haber quedado fuera de la pantalla.
+      document.getElementById(nameIssue ? "name" : "phone")?.focus();
       return;
     }
-    setPhoneError(null);
     setSubmitError(null);
 
     // En demo no hay backend ni código: se muestra el flujo y nada más.
@@ -172,9 +182,19 @@ export function GuestPage() {
             <EventDetails />
             <RsvpForm
               name={name}
-              setName={setName}
+              // El error se va apenas la persona empieza a corregir: dejarlo
+              // en rojo mientras tipea es regañar por algo que ya está
+              // arreglando.
+              setName={(value) => {
+                setName(value);
+                if (nameError) setNameError(null);
+              }}
+              nameError={nameError}
               phone={phone}
-              setPhone={setPhone}
+              setPhone={(value) => {
+                setPhone(value);
+                if (phoneError) setPhoneError(null);
+              }}
               phoneError={phoneError}
               pendingReplace={pendingReplace}
               onCancelReplace={() => setPendingReplace(null)}
@@ -563,6 +583,7 @@ function HangerIcon({ className }: { className?: string }) {
 type RsvpFormProps = {
   name: string;
   setName: (value: string) => void;
+  nameError: string | null;
   phone: string;
   setPhone: (value: string) => void;
   phoneError: string | null;
@@ -583,6 +604,7 @@ type RsvpFormProps = {
 function RsvpForm({
   name,
   setName,
+  nameError,
   phone,
   setPhone,
   phoneError,
@@ -620,8 +642,17 @@ function RsvpForm({
             placeholder="Ana Pérez"
             autoComplete="name"
             disabled={submitting}
-            className="w-full px-4 py-3 bg-ivory border border-bone rounded focus:outline-none focus:border-gold focus:bg-white transition-colors"
+            aria-invalid={Boolean(nameError)}
+            aria-describedby={nameError ? "name-error" : undefined}
+            className={`w-full px-4 py-3 bg-ivory border rounded focus:outline-none focus:bg-white transition-colors ${
+              nameError ? "border-danger" : "border-bone focus:border-gold"
+            }`}
           />
+          {nameError && (
+            <p id="name-error" className="text-sm mt-1.5 mb-0 text-danger" role="alert">
+              {nameError}
+            </p>
+          )}
         </div>
 
         <div className="mb-6">
@@ -637,18 +668,21 @@ function RsvpForm({
             autoComplete="tel"
             disabled={submitting}
             aria-invalid={Boolean(phoneError)}
-            aria-describedby="phone-hint"
+            aria-describedby={phoneError ? "phone-error" : "phone-hint"}
             className={`w-full px-4 py-3 bg-ivory border rounded focus:outline-none focus:bg-white transition-colors ${
               phoneError ? "border-danger" : "border-bone focus:border-gold"
             }`}
           />
-          <p id="phone-hint" className="text-sm mt-1.5 mb-0 text-muted">
-            {phoneError ? (
-              <span className="text-danger">{phoneError}</span>
-            ) : (
-              "Solo números, sin espacios. Es lo que nos permite reconocerte si después querés cambiar algo."
-            )}
-          </p>
+          {phoneError ? (
+            <p id="phone-error" className="text-sm mt-1.5 mb-0 text-danger" role="alert">
+              {phoneError}
+            </p>
+          ) : (
+            <p id="phone-hint" className="text-sm mt-1.5 mb-0 text-muted">
+              Solo números, sin espacios. Es lo que nos permite reconocerte si
+              después querés cambiar algo.
+            </p>
+          )}
         </div>
 
         <CountStepper
